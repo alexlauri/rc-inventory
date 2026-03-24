@@ -2,13 +2,26 @@
 
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
-import { useParams, useRouter } from "next/navigation";
+import { useParams, useRouter, useSearchParams } from "next/navigation";
 
 type CountLine = {
   id: string;
   item_name: string;
   item_unit: string;
   item_category: string;
+  item_supplier?: string | null;
+  supplier?: string | null;
+  supplier_name?: string | null;
+  distributor?: string | null;
+  distributor_name?: string | null;
+  item_distributor?: string | null;
+  vendor?: string | null;
+  vendor_name?: string | null;
+  item_vendor?: string | null;
+  source?: string | null;
+  item_source?: string | null;
+  purchased_from?: string | null;
+  order_from?: string | null;
   item_threshold: number;
   item_par: number;
   item_sort_order: number;
@@ -16,15 +29,94 @@ type CountLine = {
   storage_qty: number;
 };
 
+function getSupplierLabel(item: ReportItem) {
+  const line = item as ReportItem & {
+    item_supplier?: string | null;
+    supplier?: string | null;
+    supplier_name?: string | null;
+    distributor?: string | null;
+    distributor_name?: string | null;
+    item_distributor?: string | null;
+    vendor?: string | null;
+    vendor_name?: string | null;
+    item_vendor?: string | null;
+    source?: string | null;
+    item_source?: string | null;
+    purchased_from?: string | null;
+    order_from?: string | null;
+  };
+
+  return (
+    line.item_supplier ||
+    line.supplier ||
+    line.supplier_name ||
+    line.distributor ||
+    line.distributor_name ||
+    line.item_distributor ||
+    line.vendor ||
+    line.vendor_name ||
+    line.item_vendor ||
+    line.source ||
+    line.item_source ||
+    line.purchased_from ||
+    line.order_from ||
+    "Other"
+  );
+}
+
 type ReportItem = CountLine & {
   total: number;
   status: "critical" | "low";
   suggestedOrderQty: number;
 };
 
+function buildInventoryReportMessage(items: ReportItem[]) {
+  const today = new Date();
+  const formattedDate = today.toLocaleDateString("en-US", {
+    month: "long",
+    day: "numeric",
+  });
+
+  if (items.length === 0) {
+    return `Rolling Cones Order Guide - ${formattedDate}\n\nNo items need to be reordered.`;
+  }
+
+  const groupedItems = items.reduce<Record<string, ReportItem[]>>((acc, item) => {
+    const supplier = getSupplierLabel(item);
+
+    if (!acc[supplier]) {
+      acc[supplier] = [];
+    }
+
+    acc[supplier].push(item);
+    return acc;
+  }, {});
+
+  const sections: string[] = [`Rolling Cones Order Guide - ${formattedDate}`];
+
+  Object.entries(groupedItems)
+    .sort(([a], [b]) => a.localeCompare(b))
+    .forEach(([supplier, supplierItems]) => {
+      sections.push("", supplier);
+
+      const criticalItems = supplierItems.filter((item) => item.status === "critical");
+      const lowItems = supplierItems.filter((item) => item.status === "low");
+
+      [...criticalItems, ...lowItems].forEach((item) => {
+        sections.push(
+          `- ${item.item_name}: order ${item.suggestedOrderQty} ${item.item_unit}`
+        );
+      });
+    });
+
+  return sections.join("\n");
+}
+
 export default function CountReportPage() {
   const params = useParams<{ id: string }>();
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const closingRunId = searchParams.get("closing_run_id");
   const countId = params?.id;
 
   const [lines, setLines] = useState<CountLine[]>([]);
@@ -61,6 +153,7 @@ export default function CountReportPage() {
   }, [countId]);
 
   const reportItems = useMemo<ReportItem[]>(() => {
+
     return lines
       .map((line) => {
         const total = line.trailer_qty + line.storage_qty;
@@ -96,6 +189,16 @@ export default function CountReportPage() {
 
   const criticalItems = reportItems.filter((item) => item.status === "critical");
   const lowItems = reportItems.filter((item) => item.status === "low");
+
+  function persistReportMessage() {
+    const reportMessage = buildInventoryReportMessage(reportItems);
+
+    if (typeof window !== "undefined") {
+      const storageKeyBase = closingRunId ?? countId;
+      window.localStorage.setItem(`inventory_report_message_${storageKeyBase}`, reportMessage);
+      window.localStorage.setItem(`inventory_report_copied_${storageKeyBase}`, "false");
+    }
+  }
 
   async function handleSubmitReport() {
     if (!countId) return;
@@ -142,8 +245,58 @@ export default function CountReportPage() {
         throw new Error(messageParts.join(" — "));
       }
       const nextStatus = json.count?.status ?? "submitted";
+
+      persistReportMessage();
+
+      if (closingRunId) {
+        const storedUser = window.localStorage.getItem("rc_user");
+
+        if (storedUser) {
+          const user = JSON.parse(storedUser) as { id: string; name: string };
+
+          const closingRes = await fetch(`/api/closing/${closingRunId}`);
+          const closingText = await closingRes.text();
+          let closingJson: {
+            error?: string;
+            steps?: Array<{ id: string; tool_key: string | null; is_complete: boolean }>;
+          } = {};
+
+          try {
+            closingJson = closingText ? JSON.parse(closingText) : {};
+          } catch {
+            closingJson = {};
+          }
+
+          if (closingRes.ok) {
+            const inventoryStep = (closingJson.steps ?? []).find(
+              (step) => step.tool_key === "inventory_count"
+            );
+
+            if (inventoryStep && !inventoryStep.is_complete) {
+              await fetch(`/api/closing/${closingRunId}`, {
+                method: "PATCH",
+                headers: {
+                  "Content-Type": "application/json",
+                },
+                body: JSON.stringify({
+                  step_id: inventoryStep.id,
+                  is_complete: true,
+                  completed_by_user_id: user.id,
+                  completed_by_name: user.name,
+                }),
+              });
+            }
+          }
+        }
+      }
+
       setCountStatus(nextStatus);
-      router.push(`/counts/${countId}/message`);
+
+      if (closingRunId && typeof window !== "undefined") {
+        window.sessionStorage.setItem(`inventory_report_scroll_${closingRunId}`, "true");
+      }
+
+      router.push(closingRunId ? `/closing/${closingRunId}` : "/");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to submit report");
     } finally {
@@ -158,7 +311,13 @@ export default function CountReportPage() {
       <main className="mx-auto max-w-md p-6 space-y-6 pb-32">
         <div className="pt-4">
           <Link
-            href={countId ? `/counts/${countId}` : "/"}
+            href={
+              countId
+                ? `/counts/${countId}${
+                    closingRunId ? `?closing_run_id=${closingRunId}` : ""
+                  }`
+                : "/"
+            }
             className="text-sm text-gray-600 underline"
           >
             ← Back to Count
@@ -168,7 +327,7 @@ export default function CountReportPage() {
         <div className="space-y-1">
           <h1 className="text-3xl font-semibold">Report</h1>
           <p className="text-sm text-gray-600">
-            Review low and critical items before submitting.
+            Review low and critical items before saving inventory.
           </p>
         </div>
 
@@ -210,22 +369,26 @@ export default function CountReportPage() {
       <div className="pointer-events-none fixed inset-x-0 bottom-0 z-40">
         <div className="mx-auto flex max-w-md justify-center px-4 pb-4">
           <div className="pointer-events-auto w-full rounded-2xl bg-white/95 p-3 shadow-lg ring-1 ring-black/5 backdrop-blur">
-            {!isSubmitted ? (
-              <button
-                onClick={handleSubmitReport}
-                disabled={submitting || loading}
-                className="w-full rounded-xl bg-black px-4 py-3 text-white font-medium disabled:opacity-50"
-              >
-                {submitting ? "Submitting..." : "Submit Report"}
-              </button>
-            ) : (
-              <button
-                onClick={() => router.push(`/counts/${countId}/message`)}
-                className="w-full rounded-xl bg-black px-4 py-3 text-white font-medium"
-              >
-                View Reorder Message
-              </button>
-            )}
+            <button
+              onClick={() => {
+                if (!isSubmitted) {
+                  void handleSubmitReport();
+                  return;
+                }
+
+                persistReportMessage();
+
+                if (closingRunId && typeof window !== "undefined") {
+                  window.sessionStorage.setItem(`inventory_report_scroll_${closingRunId}`, "true");
+                }
+
+                router.push(closingRunId ? `/closing/${closingRunId}` : "/");
+              }}
+              disabled={submitting || loading}
+              className="w-full rounded-xl bg-black px-4 py-3 text-white font-medium disabled:opacity-50"
+            >
+              {submitting ? "Saving..." : "Save Report"}
+            </button>
           </div>
         </div>
       </div>

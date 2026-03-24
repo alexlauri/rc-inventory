@@ -1,21 +1,27 @@
+// NEW FILE CONTENT BELOW
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
+import { createClient } from "@/lib/supabase/client";
 
-type InventoryCount = {
+type ChecklistRun = {
   id: string;
-  count_date: string;
-  counted_by: string | null;
-  notes: string | null;
-  trailer_complete: boolean;
-  storage_complete: boolean;
+  run_date: string;
   status: string;
   submitted_by_name: string | null;
   created_at: string;
 };
 
-function formatCountDate(dateString: string) {
+type StoredUser = {
+  id?: string;
+  name?: string;
+  pin?: string;
+  role?: string;
+  active?: boolean;
+};
+
+function formatRunDate(dateString: string) {
   return new Date(dateString).toLocaleDateString(undefined, {
     year: "numeric",
     month: "short",
@@ -23,20 +29,11 @@ function formatCountDate(dateString: string) {
   });
 }
 
-function getCountStatusMeta(count: InventoryCount) {
-  const isComplete = count.trailer_complete && count.storage_complete;
-
-  if (count.status === "submitted") {
+function getRunStatusMeta(run: ChecklistRun) {
+  if (run.status === "submitted") {
     return {
       label: "Submitted",
       classes: "border-green-200 bg-green-50 text-green-700",
-    };
-  }
-
-  if (isComplete) {
-    return {
-      label: "Ready",
-      classes: "border-blue-200 bg-blue-50 text-blue-700",
     };
   }
 
@@ -46,28 +43,94 @@ function getCountStatusMeta(count: InventoryCount) {
   };
 }
 
+function formatStaffDate(date: Date) {
+  return date.toLocaleDateString(undefined, {
+    month: "long",
+    day: "numeric",
+  });
+}
+
+function formatStaffTime(date: Date) {
+  return date.toLocaleTimeString(undefined, {
+    hour: "numeric",
+    minute: "2-digit",
+  });
+}
+
+function isAdminUser(user: StoredUser | null) {
+  return (user?.role ?? "").trim().toLowerCase() === "admin";
+}
+
 export default function HomePage() {
   const router = useRouter();
-  const [counts, setCounts] = useState<InventoryCount[]>([]);
+  const [openingRuns, setOpeningRuns] = useState<ChecklistRun[]>([]);
+  const [closingRuns, setClosingRuns] = useState<ChecklistRun[]>([]);
   const [loading, setLoading] = useState(true);
-  const [creating, setCreating] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [draftToDelete, setDraftToDelete] = useState<InventoryCount | null>(null);
-  const [deletingCountId, setDeletingCountId] = useState<string | null>(null);
+  const [currentUser, setCurrentUser] = useState<StoredUser | null>(null);
+  const [userResolved, setUserResolved] = useState(false);
+  const [now, setNow] = useState(() => new Date());
 
-  async function loadCounts() {
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+
+    const raw = window.localStorage.getItem("rc_user");
+
+    if (!raw) {
+      setCurrentUser(null);
+      setUserResolved(true);
+      return;
+    }
+
+    try {
+      setCurrentUser(JSON.parse(raw) as StoredUser);
+    } catch {
+      setCurrentUser(null);
+    } finally {
+      setUserResolved(true);
+    }
+  }, []);
+
+  useEffect(() => {
+    const interval = window.setInterval(() => {
+      setNow(new Date());
+    }, 1000 * 30);
+
+    return () => window.clearInterval(interval);
+  }, []);
+
+  const isAdmin = useMemo(() => isAdminUser(currentUser), [currentUser]);
+
+  async function loadRuns() {
     try {
       setError(null);
       setLoading(true);
 
-      const res = await fetch("/api/counts");
-      const json = await res.json();
+      const supabase = createClient();
 
-      if (!res.ok) {
-        throw new Error(json.error || "Failed to load counts");
+      const [openingResult, closingResult] = await Promise.all([
+        supabase
+          .from("opening_runs")
+          .select("id, run_date, status, submitted_by_name, created_at")
+          .order("run_date", { ascending: false })
+          .order("created_at", { ascending: false }),
+        supabase
+          .from("closing_runs")
+          .select("id, run_date, status, submitted_by_name, created_at")
+          .order("run_date", { ascending: false })
+          .order("created_at", { ascending: false }),
+      ]);
+
+      if (openingResult.error) {
+        throw new Error(openingResult.error.message || "Failed to load opening runs");
       }
 
-      setCounts(json.counts ?? []);
+      if (closingResult.error) {
+        throw new Error(closingResult.error.message || "Failed to load closing runs");
+      }
+
+      setOpeningRuns(openingResult.data ?? []);
+      setClosingRuns(closingResult.data ?? []);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Something went wrong");
     } finally {
@@ -75,51 +138,16 @@ export default function HomePage() {
     }
   }
 
-  async function handleCreateCount() {
+  async function handleCreateClosingRun() {
     try {
       setError(null);
-      setCreating(true);
 
-      const res = await fetch("/api/counts", {
+      const res = await fetch("/api/closing", {
         method: "POST",
       });
 
-      const json = await res.json();
-
-      if (!res.ok) {
-        throw new Error(json.error || "Failed to create count");
-      }
-
-      router.push(`/counts/${json.count.id}`);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to create count");
-    } finally {
-      setCreating(false);
-    }
-  }
-
-  function openDeleteDraftSheet(count: InventoryCount) {
-    setDraftToDelete(count);
-  }
-
-  function closeDeleteDraftSheet() {
-    if (deletingCountId) return;
-    setDraftToDelete(null);
-  }
-
-  async function confirmDeleteDraft() {
-    if (!draftToDelete) return;
-
-    try {
-      setError(null);
-      setDeletingCountId(draftToDelete.id);
-
-      const res = await fetch(`/api/counts/${draftToDelete.id}`, {
-        method: "DELETE",
-      });
-
       const text = await res.text();
-      let json: { error?: string } = {};
+      let json: { error?: string; run?: { id: string } } = {};
 
       try {
         json = text ? JSON.parse(text) : {};
@@ -127,161 +155,294 @@ export default function HomePage() {
         json = {};
       }
 
-      if (!res.ok) {
-        throw new Error(json.error || "Failed to delete count");
+      if (!res.ok || !json.run?.id) {
+        throw new Error(json.error || "Failed to create closing run");
       }
 
-      setCounts((prev) => prev.filter((count) => count.id !== draftToDelete.id));
-      setDraftToDelete(null);
+      router.push(`/closing/${json.run.id}`);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to delete count");
-    } finally {
-      setDeletingCountId(null);
+      setError(err instanceof Error ? err.message : "Failed to create closing run");
+    }
+  }
+
+  async function handleCreateOpeningRun() {
+    try {
+      setError(null);
+
+      const res = await fetch("/api/opening", {
+        method: "POST",
+      });
+
+      const text = await res.text();
+      let json: { error?: string; run?: { id: string } } = {};
+
+      try {
+        json = text ? JSON.parse(text) : {};
+      } catch {
+        json = {};
+      }
+
+      if (!res.ok || !json.run?.id) {
+        throw new Error(json.error || "Failed to create opening run");
+      }
+
+      router.push(`/opening/${json.run.id}`);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to create opening run");
     }
   }
 
   useEffect(() => {
-    loadCounts();
+    void loadRuns();
   }, []);
+
+  const todayKey = useMemo(() => {
+    const year = now.getFullYear();
+    const month = `${now.getMonth() + 1}`.padStart(2, "0");
+    const day = `${now.getDate()}`.padStart(2, "0");
+    return `${year}-${month}-${day}`;
+  }, [now]);
+
+  const todaysOpeningRun = useMemo(() => {
+    return openingRuns.find((run) => run.run_date === todayKey) ?? null;
+  }, [openingRuns, todayKey]);
+
+  const todaysClosingRun = useMemo(() => {
+    return closingRuns.find((run) => run.run_date === todayKey) ?? null;
+  }, [closingRuns, todayKey]);
+
+  async function handleStaffOpen() {
+    if (todaysOpeningRun) {
+      router.push(`/opening/${todaysOpeningRun.id}`);
+      return;
+    }
+
+    await handleCreateOpeningRun();
+  }
+
+  async function handleStaffClose() {
+    if (todaysClosingRun) {
+      router.push(`/closing/${todaysClosingRun.id}`);
+      return;
+    }
+
+    await handleCreateClosingRun();
+  }
+
+  const openingSubmitted = todaysOpeningRun?.status === "submitted";
+  const closingSubmitted = todaysClosingRun?.status === "submitted";
+
+  if (!userResolved) {
+    return (
+      <main className="mx-auto flex min-h-screen max-w-md items-center justify-center p-4">
+        <div className="text-sm text-gray-600">Loading...</div>
+      </main>
+    );
+  }
+
+  if (!isAdmin) {
+    return (
+      <main className="mx-auto flex min-h-screen max-w-md flex-col justify-between p-4 pb-10">
+        <div className="space-y-2 pt-6">
+          <div className="text-4xl font-semibold tracking-tight">{formatStaffDate(now)}</div>
+          <div className="text-xl text-gray-500">{formatStaffTime(now)}</div>
+        </div>
+
+        <div className="space-y-4 pb-8">
+          {error && (
+            <div className="rounded-xl border border-red-300 bg-red-50 p-4 text-sm text-red-700">
+              {error}
+            </div>
+          )}
+
+          <button
+            type="button"
+            onClick={() => void handleStaffOpen()}
+            disabled={loading}
+            className={`w-full rounded-3xl border px-6 py-8 text-left shadow-sm transition active:scale-[0.99] ${
+              openingSubmitted
+                ? "border-green-200 bg-green-50 text-green-700"
+                : "bg-white text-gray-900"
+            }`}
+          >
+            <div className="text-3xl font-semibold">Open</div>
+            <div className="mt-2 text-sm text-gray-500">
+              {loading
+                ? "Loading..."
+                : openingSubmitted
+                ? "Completed"
+                : todaysOpeningRun
+                ? "Resume checklist"
+                : "Start checklist"}
+            </div>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => void handleStaffClose()}
+            disabled={loading}
+            className={`w-full rounded-3xl border px-6 py-8 text-left shadow-sm transition active:scale-[0.99] ${
+              closingSubmitted
+                ? "border-green-200 bg-green-50 text-green-700"
+                : "bg-white text-gray-900"
+            }`}
+          >
+            <div className="text-3xl font-semibold">Close</div>
+            <div className="mt-2 text-sm text-gray-500">
+              {loading
+                ? "Loading..."
+                : closingSubmitted
+                ? "Completed"
+                : todaysClosingRun
+                ? "Resume checklist"
+                : "Start checklist"}
+            </div>
+          </button>
+        </div>
+      </main>
+    );
+  }
 
   return (
     <>
-      <main className="mx-auto max-w-md p-4 space-y-6 pb-32">
-      <div className="space-y-2">
-        <h1 className="text-3xl font-semibold tracking-tight">Weekly Stock Check</h1>
-      </div>
-
-      {error && (
-        <div className="rounded-xl border border-red-300 bg-red-50 p-4 text-sm text-red-700">
-          {error}
+      <main className="mx-auto max-w-md space-y-6 p-4 pb-32">
+        <div className="space-y-2">
+          <h1 className="text-3xl font-semibold tracking-tight">Operations</h1>
+          <p className="text-sm text-gray-500">
+            Opening and closing checklists for service.
+          </p>
         </div>
-      )}
 
-      {loading ? (
-        <div className="text-sm text-gray-600">Loading counts...</div>
-      ) : counts.length === 0 ? (
-        <div className="rounded-2xl border border-dashed p-8 text-center text-sm leading-6 text-gray-600">
-          No counts yet. Tap "Start New Weekly Count" to begin your first inventory check.
-        </div>
-      ) : (
-        <div className="space-y-3">
-          <div className="text-sm font-medium uppercase tracking-wide text-gray-500">
-            Previous Counts
+        {error && (
+          <div className="rounded-xl border border-red-300 bg-red-50 p-4 text-sm text-red-700">
+            {error}
           </div>
-          {counts.map((count) => {
-            const status = getCountStatusMeta(count);
-            const isDraft = count.status === "draft";
+        )}
 
-            return (
-              <div
-                key={count.id}
-                className="rounded-2xl border bg-white p-4 text-left shadow-sm transition hover:bg-gray-50"
-              >
-                <div
-                  role="button"
-                  tabIndex={0}
-                  onClick={() => router.push(`/counts/${count.id}`)}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter" || e.key === " ") {
-                      e.preventDefault();
-                      router.push(`/counts/${count.id}`);
-                    }
-                  }}
-                  className="block cursor-pointer"
-                >
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="space-y-1">
-                      <div className="font-medium">{formatCountDate(count.count_date)}</div>
-                      {count.submitted_by_name && (
-                        <div className="text-sm text-gray-600">
-                          Submitted by {count.submitted_by_name}
-                        </div>
-                      )}
-                    </div>
-
-                    <div className={`rounded-full border px-2.5 py-1 text-xs font-medium ${status.classes}`}>
-                      {status.label}
-                    </div>
-                  </div>
-
-                </div>
-
-                {isDraft && (
-                  <div className="mt-3 flex justify-end">
-                    <button
-                      type="button"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        openDeleteDraftSheet(count);
-                      }}
-                      className="rounded-lg border border-red-200 px-3 py-2 text-sm text-red-700 hover:bg-red-50"
-                    >
-                      Delete Draft
-                    </button>
-                  </div>
-                )}
+        {loading ? (
+          <div className="text-sm text-gray-600">Loading operations...</div>
+        ) : (
+          <div className="space-y-6">
+            <div className="space-y-3">
+              <div className="text-sm font-medium uppercase tracking-wide text-gray-500">
+                Recent Closing Checklists
               </div>
-            );
-          })}
-        </div>
-      )}
+              {closingRuns.length === 0 ? (
+                <div className="rounded-2xl border border-dashed p-6 text-sm text-gray-600">
+                  No closing checklists yet.
+                </div>
+              ) : (
+                closingRuns.map((run) => {
+                  const status = getRunStatusMeta(run);
+
+                  return (
+                    <div
+                      key={run.id}
+                      role="button"
+                      tabIndex={0}
+                      onClick={() => router.push(`/closing/${run.id}`)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter" || e.key === " ") {
+                          e.preventDefault();
+                          router.push(`/closing/${run.id}`);
+                        }
+                      }}
+                      className="cursor-pointer rounded-2xl border bg-white p-4 text-left shadow-sm transition hover:bg-gray-50"
+                    >
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="space-y-1">
+                          <div className="font-medium">{formatRunDate(run.run_date)}</div>
+                          {run.submitted_by_name && (
+                            <div className="text-sm text-gray-600">
+                              Submitted by {run.submitted_by_name}
+                            </div>
+                          )}
+                        </div>
+
+                        <div
+                          className={`rounded-full border px-2.5 py-1 text-xs font-medium ${status.classes}`}
+                        >
+                          {status.label}
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })
+              )}
+            </div>
+
+            <div className="space-y-3">
+              <div className="text-sm font-medium uppercase tracking-wide text-gray-500">
+                Recent Opening Checklists
+              </div>
+              {openingRuns.length === 0 ? (
+                <div className="rounded-2xl border border-dashed p-6 text-sm text-gray-600">
+                  No opening checklists yet.
+                </div>
+              ) : (
+                openingRuns.map((run) => {
+                  const status = getRunStatusMeta(run);
+
+                  return (
+                    <div
+                      key={run.id}
+                      role="button"
+                      tabIndex={0}
+                      onClick={() => router.push(`/opening/${run.id}`)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter" || e.key === " ") {
+                          e.preventDefault();
+                          router.push(`/opening/${run.id}`);
+                        }
+                      }}
+                      className="cursor-pointer rounded-2xl border bg-white p-4 text-left shadow-sm transition hover:bg-gray-50"
+                    >
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="space-y-1">
+                          <div className="font-medium">{formatRunDate(run.run_date)}</div>
+                          {run.submitted_by_name && (
+                            <div className="text-sm text-gray-600">
+                              Submitted by {run.submitted_by_name}
+                            </div>
+                          )}
+                        </div>
+
+                        <div
+                          className={`rounded-full border px-2.5 py-1 text-xs font-medium ${status.classes}`}
+                        >
+                          {status.label}
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })
+              )}
+            </div>
+          </div>
+        )}
       </main>
 
       <div className="pointer-events-none fixed inset-x-0 bottom-0 z-40">
         <div className="mx-auto flex max-w-md justify-center px-4 pb-4">
           <div className="pointer-events-auto w-full rounded-2xl bg-white/95 p-3 shadow-lg ring-1 ring-black/5 backdrop-blur">
-            <button
-              onClick={handleCreateCount}
-              disabled={creating}
-              className="w-full rounded-xl bg-black px-4 py-3 text-white font-medium shadow-sm transition active:scale-[0.99] disabled:opacity-50"
-            >
-              {creating ? "Creating..." : "Start New Weekly Count"}
-            </button>
+            <div className="flex gap-2">
+              <button
+                onClick={() => void handleCreateOpeningRun()}
+                className="w-1/2 rounded-xl border px-4 py-3 font-medium text-gray-900 shadow-sm transition active:scale-[0.99]"
+              >
+                Start Opening
+              </button>
+
+              <button
+                onClick={() => void handleCreateClosingRun()}
+                className="w-1/2 rounded-xl bg-black px-4 py-3 font-medium text-white shadow-sm transition active:scale-[0.99]"
+              >
+                Start Closing
+              </button>
+            </div>
           </div>
         </div>
       </div>
-
-      {draftToDelete && (
-        <div className="fixed inset-0 z-50 flex items-end bg-black/40">
-          <button
-            type="button"
-            aria-label="Close delete draft sheet"
-            onClick={closeDeleteDraftSheet}
-            className="absolute inset-0"
-          />
-
-          <div className="relative z-10 w-full rounded-t-3xl bg-white p-5 shadow-2xl">
-            <div className="mx-auto mb-4 h-1.5 w-12 rounded-full bg-gray-300" />
-
-            <div className="mb-4 space-y-1">
-              <div className="text-lg font-semibold">Delete Draft Count?</div>
-              <div className="text-sm text-gray-500">
-                This will permanently remove the draft for {formatCountDate(draftToDelete.count_date)}.
-              </div>
-            </div>
-
-            <div className="flex flex-col gap-3 pb-4">
-              <button
-                type="button"
-                onClick={confirmDeleteDraft}
-                disabled={Boolean(deletingCountId)}
-                className="w-full rounded bg-red-600 px-4 py-3 text-white disabled:opacity-50"
-              >
-                {deletingCountId ? "Deleting..." : "Delete Draft"}
-              </button>
-
-              <button
-                type="button"
-                onClick={closeDeleteDraftSheet}
-                disabled={Boolean(deletingCountId)}
-                className="w-full rounded border px-4 py-3 disabled:opacity-50"
-              >
-                Cancel
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
     </>
   );
 }

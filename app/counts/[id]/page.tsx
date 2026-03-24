@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { useParams } from "next/navigation";
+import { useParams, useSearchParams } from "next/navigation";
 import Link from "next/link";
 
 type CountLine = {
@@ -18,6 +18,8 @@ type CountLine = {
 
 export default function CountDetailPage() {
   const params = useParams<{ id: string }>();
+  const searchParams = useSearchParams();
+  const closingRunId = searchParams.get("closing_run_id");
   const countId = params?.id;
 
   const [lines, setLines] = useState<CountLine[]>([]);
@@ -106,8 +108,11 @@ export default function CountDetailPage() {
     <>
       <main className="mx-auto max-w-md p-6 space-y-6 pb-32">
       <div className="pt-4">
-        <Link href="/" className="text-sm text-gray-600 underline">
-          ← Back to Counts
+        <Link
+          href={closingRunId ? `/closing/${closingRunId}` : "/"}
+          className="text-sm text-gray-600 underline"
+        >
+          ← Back
         </Link>
       </div>
   
@@ -146,7 +151,13 @@ export default function CountDetailPage() {
         <div className="mx-auto flex max-w-md justify-center px-4 pb-4">
           <div className="pointer-events-auto w-full rounded-2xl bg-white/95 p-3 shadow-lg ring-1 ring-black/5 backdrop-blur">
             <Link
-              href={countId ? `/counts/${countId}/report` : "#"}
+              href={
+                countId
+                  ? `/counts/${countId}/report${
+                      closingRunId ? `?closing_run_id=${closingRunId}` : ""
+                    }`
+                  : "#"
+              }
               className="block w-full rounded-xl bg-black px-4 py-3 text-center font-medium text-white shadow-sm transition active:scale-[0.99]"
             >
               Continue

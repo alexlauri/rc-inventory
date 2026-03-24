@@ -16,7 +16,7 @@ export async function POST(request: Request) {
 
     const { data, error } = await supabase
       .from("app_users")
-      .select("id, name, active")
+      .select("id, name, pin, role, active")
       .eq("pin", pin)
       .eq("active", true)
       .maybeSingle();

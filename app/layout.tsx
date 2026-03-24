@@ -8,6 +8,7 @@ import "./globals.css";
 type LoggedInUser = {
   id: string;
   name: string;
+  role?: string;
 };
 
 export default function RootLayout({
@@ -19,6 +20,7 @@ export default function RootLayout({
   const router = useRouter();
   const [checkedAuth, setCheckedAuth] = useState(false);
   const [user, setUser] = useState<LoggedInUser | null>(null);
+  const isAdmin = (user?.role ?? "").trim().toLowerCase() === "admin";
 
   useEffect(() => {
     const stored = window.localStorage.getItem("rc_user");
@@ -71,29 +73,32 @@ export default function RootLayout({
           {pathname !== "/login" && (
             <header className="sticky top-0 z-10 border-b bg-white">
               <div className="flex items-center justify-between px-4 py-3">
-                <nav className="flex items-center gap-4">
-                  <Link href="/" className="font-semibold">
-                    Counts
-                  </Link>
-                  <Link href="/admin" className="font-semibold text-gray-600">
-                    Admin
-                  </Link>
-                </nav>
-
-                <div className="flex items-center gap-3">
-                  {user?.name && (
-                    <div className="text-sm text-gray-500">
-                      {user.name}
-                    </div>
+                <div className="flex items-center gap-4">
+                  {isAdmin ? (
+                    <>
+                      <Link href="/" className="font-semibold">
+                        Counts
+                      </Link>
+                      <Link href="/admin" className="font-semibold text-gray-600">
+                        Admin
+                      </Link>
+                    </>
+                  ) : (
+                    user?.name && (
+                      <div className="text-sm text-gray-500">
+                        {user.name}
+                      </div>
+                    )
                   )}
-                  <button
-                    type="button"
-                    onClick={handleLogout}
-                    className="text-sm text-gray-600 underline"
-                  >
-                    Log out
-                  </button>
                 </div>
+
+                <button
+                  type="button"
+                  onClick={handleLogout}
+                  className="text-sm text-gray-600 underline"
+                >
+                  Log out
+                </button>
               </div>
             </header>
           )}

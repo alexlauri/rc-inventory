@@ -6,6 +6,9 @@ import { useRouter } from "next/navigation";
 type LoggedInUser = {
   id: string;
   name: string;
+  pin?: string;
+  role?: string;
+  active?: boolean;
 };
 
 export default function LoginPage() {

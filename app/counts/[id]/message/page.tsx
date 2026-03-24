@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
-import { useParams } from "next/navigation";
+import { useParams, useSearchParams } from "next/navigation";
 
 type CountLine = {
   id: string;
@@ -37,6 +37,8 @@ type InventoryItem = {
 
 export default function CountMessagePage() {
   const params = useParams<{ id: string }>();
+  const searchParams = useSearchParams();
+  const closingRunId = searchParams.get("closing_run_id");
   const countId = params?.id;
 
   const [lines, setLines] = useState<CountLine[]>([]);
@@ -82,6 +84,57 @@ export default function CountMessagePage() {
 
     loadMessageData();
   }, [countId]);
+
+  useEffect(() => {
+    async function completeInventoryStep() {
+      if (!closingRunId || !countId) return;
+      if (!count || count.status !== "submitted") return;
+
+      try {
+        const storedUser = typeof window !== "undefined"
+          ? JSON.parse(localStorage.getItem("rc_user") || "null")
+          : null;
+
+        if (!storedUser?.id || !storedUser?.name) return;
+
+        const closingRes = await fetch(`/api/closing/${closingRunId}`);
+        const closingText = await closingRes.text();
+
+        let closingJson: { steps?: Array<{ id: string; tool_key: string | null; is_complete: boolean }> } = {};
+
+        try {
+          closingJson = closingText ? JSON.parse(closingText) : {};
+        } catch {
+          closingJson = {};
+        }
+
+        if (!closingRes.ok) return;
+
+        const inventoryStep = (closingJson.steps ?? []).find(
+          (step) => step.tool_key === "inventory_count"
+        );
+
+        if (!inventoryStep || inventoryStep.is_complete) return;
+
+        await fetch(`/api/closing/${closingRunId}`, {
+          method: "PATCH",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            step_id: inventoryStep.id,
+            is_complete: true,
+            completed_by_user_id: storedUser.id,
+            completed_by_name: storedUser.name,
+          }),
+        });
+      } catch {
+        // silent fail — do not block UX
+      }
+    }
+
+    completeInventoryStep();
+  }, [closingRunId, countId, count]);
 
   const supplierByItemId = useMemo(() => {
     return inventoryItems.reduce<Record<string, string>>((acc, item) => {
@@ -180,7 +233,13 @@ export default function CountMessagePage() {
       <main className="mx-auto max-w-md p-6 space-y-6 pb-32">
         <div className="pt-4">
           <Link
-            href={countId ? `/counts/${countId}/report` : "/"}
+            href={
+              countId
+                ? `/counts/${countId}/report${
+                    closingRunId ? `?closing_run_id=${closingRunId}` : ""
+                  }`
+                : "/"
+            }
             className="text-sm text-gray-600 underline"
           >
             ← Back to Report
@@ -235,10 +294,10 @@ export default function CountMessagePage() {
                 </button>
 
                 <Link
-                  href="/"
+                  href={closingRunId ? `/closing/${closingRunId}` : "/"}
                   className="block w-full rounded-xl border px-4 py-3 text-center font-medium text-gray-900"
                 >
-                  Home
+                  {closingRunId ? "Return to Closing" : "Home"}
                 </Link>
               </div>
             </div>
