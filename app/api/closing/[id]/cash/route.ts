@@ -288,7 +288,7 @@ export async function PUT(
     const { error: closingRunError } = await supabase
       .from("closing_runs")
       .update({
-        cash_count_total: Number(updatedCashCount.actual_total ?? cashCount.actual_total ?? 0),
+        cash_count_total: Number(updatedCashCount.actual_total ?? 0),
       })
       .eq("id", id);
 
