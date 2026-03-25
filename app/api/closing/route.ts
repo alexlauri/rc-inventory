@@ -12,6 +12,24 @@ export async function POST() {
     // use closing_last_day on Sundays, otherwise standard
     const templateId = day === 0 ? "closing_last_day" : "closing_standard";
 
+    const { data: existingRun, error: existingRunError } = await supabase
+      .from("closing_runs")
+      .select("*")
+      .eq("run_date", today)
+      .eq("template_id", templateId)
+      .in("status", ["draft", "in_progress"])
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (existingRunError) {
+      throw new Error(existingRunError.message || "Failed to load existing closing run");
+    }
+
+    if (existingRun) {
+      return NextResponse.json({ run: existingRun });
+    }
+
     const { data: run, error: runError } = await supabase
       .from("closing_runs")
       .insert({

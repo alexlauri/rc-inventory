@@ -184,7 +184,7 @@ export async function PATCH(
 
     const { data: cashCount, error: cashCountError } = await supabase
       .from("closing_cash_counts")
-      .select("id")
+      .select("id, actual_total")
       .eq("closing_run_id", id)
       .order("created_at", { ascending: false })
       .limit(1)
@@ -283,6 +283,32 @@ export async function PUT(
 
     if (updateError || !updatedCashCount) {
       throw new Error(updateError?.message || "Failed to submit cash count");
+    }
+
+    const { error: closingRunError } = await supabase
+      .from("closing_runs")
+      .update({
+        cash_count_total: Number(updatedCashCount.actual_total ?? cashCount.actual_total ?? 0),
+      })
+      .eq("id", id);
+
+    if (closingRunError) {
+      throw new Error(closingRunError.message || "Failed to update closing run cash total");
+    }
+
+    const { error: stepError } = await supabase
+      .from("closing_run_steps")
+      .update({
+        is_complete: true,
+        completed_by_user_id: countedByUserId ?? null,
+        completed_by_name: countedByName ?? null,
+        completed_at: new Date().toISOString(),
+      })
+      .eq("closing_run_id", id)
+      .eq("tool_key", "cash_count");
+
+    if (stepError) {
+      throw new Error(stepError.message || "Failed to complete cash count step");
     }
 
     return NextResponse.json({ cashCount: updatedCashCount });

@@ -188,6 +188,35 @@ export default function ClosingCashPage() {
     }, 1200);
   }
 
+  async function flushPendingDenominationSaves() {
+    const pendingRowIds = Object.keys(saveTimeoutsRef.current);
+
+    if (!pendingRowIds.length) {
+      return;
+    }
+
+    pendingRowIds.forEach((rowId) => {
+      const timeoutId = saveTimeoutsRef.current[rowId];
+      if (timeoutId) {
+        clearTimeout(timeoutId);
+      }
+    });
+
+    saveTimeoutsRef.current = {};
+
+    const rowsToFlush = denominations.filter((row) => pendingRowIds.includes(row.id));
+
+    await Promise.all(
+      rowsToFlush.map((row) =>
+        persistDenominationUpdate(
+          row.id,
+          row.denomination === "coins" ? null : row.quantity ?? 0,
+          Number(row.amount ?? 0)
+        )
+      )
+    );
+  }
+
   function parseQuantityInput(value: string) {
     if (value.trim() === "") return 0;
     const parsed = Number.parseInt(value, 10);
@@ -207,6 +236,8 @@ export default function ClosingCashPage() {
       if (!storedUser?.id || !storedUser?.name) {
         throw new Error("No logged in user found");
       }
+
+      await flushPendingDenominationSaves();
 
       const res = await fetch(`/api/closing/${id}/cash`, {
         method: "PUT",
@@ -232,62 +263,10 @@ export default function ClosingCashPage() {
         throw new Error(json.error || "Failed to submit cash count");
       }
 
-      const closingRes = await fetch(`/api/closing/${id}`);
-      const closingText = await closingRes.text();
-      let closingJson: { error?: string; steps?: Array<{ id: string; tool_key: string | null; is_complete: boolean }> } = {};
+      const cashStepForScroll = denominations.length ? "cash_count" : null;
 
-      try {
-        closingJson = closingText ? JSON.parse(closingText) : {};
-      } catch {
-        closingJson = {};
-      }
-
-      if (!closingRes.ok) {
-        throw new Error(closingJson.error || "Failed to load closing steps");
-      }
-
-      // Only one cashStep definition below
-      const cashStep = (closingJson.steps ?? []).find(
-        (step) => step.tool_key === "cash_count"
-      );
-
-      if (cashStep && !cashStep.is_complete) {
-        const markCompleteRes = await fetch(`/api/closing/${id}`, {
-          method: "PATCH",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            step_id: cashStep.id,
-            is_complete: true,
-            completed_by_user_id: storedUser.id,
-            completed_by_name: storedUser.name,
-          }),
-        });
-
-        const markCompleteText = await markCompleteRes.text();
-        let markCompleteJson: { error?: string } = {};
-
-        try {
-          markCompleteJson = markCompleteText ? JSON.parse(markCompleteText) : {};
-        } catch {
-          markCompleteJson = {};
-        }
-
-        if (!markCompleteRes.ok) {
-          throw new Error(markCompleteJson.error || "Failed to complete cash checklist step");
-        }
-      }
-
-      const cashStepForScroll = (closingJson.steps ?? []).find(
-        (step) => step.tool_key === "cash_count"
-      );
-
-      if (typeof window !== "undefined" && cashStepForScroll?.id) {
-        window.sessionStorage.setItem(
-          `closing_step_scroll_${id}`,
-          cashStepForScroll.id
-        );
+      if (typeof window !== "undefined" && cashStepForScroll) {
+        window.sessionStorage.setItem(`closing_cash_scroll_${id}`, "true");
       }
 
       window.location.href = `/closing/${id}`;

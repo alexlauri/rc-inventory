@@ -14,6 +14,24 @@ export async function POST() {
     // use opening_first_day on Thursdays, otherwise standard
     const templateId = day === 4 ? "opening_first_day" : "opening_standard";
 
+    const { data: existingRun, error: existingRunError } = await supabase
+      .from("opening_runs")
+      .select("*")
+      .eq("run_date", today)
+      .eq("template_id", templateId)
+      .in("status", ["draft", "in_progress"])
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (existingRunError) {
+      throw new Error(existingRunError.message || "Failed to load existing opening run");
+    }
+
+    if (existingRun) {
+      return NextResponse.json({ run: existingRun });
+    }
+
     // create opening run
     const { data: run, error: runError } = await supabase
       .from("opening_runs")

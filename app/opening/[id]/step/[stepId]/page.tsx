@@ -26,10 +26,35 @@ export default function OpeningStepDetailPage() {
     void load();
   }, [openingId, stepId]);
 
+  // lightweight live sync for substeps
+  useEffect(() => {
+    if (!openingId || !stepId) return;
+
+    const interval = setInterval(async () => {
+      try {
+        const res = await fetch(
+          `/api/opening/${openingId}/step/${stepId}?t=${Date.now()}`,
+          { cache: "no-store" }
+        );
+
+        if (!res.ok) return;
+
+        const data = await res.json();
+        setSubsteps(data.substeps || []);
+      } catch {
+        // ignore polling errors
+      }
+    }, 2000);
+
+    return () => clearInterval(interval);
+  }, [openingId, stepId]);
+
   async function load() {
     setLoading(true);
 
-    const res = await fetch(`/api/opening/${openingId}/step/${stepId}`);
+    const res = await fetch(`/api/opening/${openingId}/step/${stepId}?t=${Date.now()}`, {
+      cache: "no-store",
+    });
 
     if (!res.ok) {
       setLoading(false);

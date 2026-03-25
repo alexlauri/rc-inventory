@@ -37,11 +37,34 @@ export default function ClosingStepDetailPage() {
     load();
   }, [closingId, stepId]);
 
+  useEffect(() => {
+    if (!closingId || !stepId) return;
+
+    const interval = setInterval(async () => {
+      try {
+        const res = await fetch(
+          `/api/closing/${closingId}/step/${stepId}?t=${Date.now()}`,
+          { cache: "no-store" }
+        );
+
+        if (!res.ok) return;
+
+        const data = await res.json();
+        setSubsteps(data.substeps || []);
+      } catch {
+        // ignore polling errors
+      }
+    }, 2000);
+
+    return () => clearInterval(interval);
+  }, [closingId, stepId]);
+
   async function load() {
     setLoading(true);
 
     const res = await fetch(
-      `/api/closing/${closingId}/step/${stepId}`
+      `/api/closing/${closingId}/step/${stepId}?t=${Date.now()}`,
+      { cache: "no-store" }
     );
 
     if (!res.ok) {

@@ -190,14 +190,92 @@ export default function CountReportPage() {
   const criticalItems = reportItems.filter((item) => item.status === "critical");
   const lowItems = reportItems.filter((item) => item.status === "low");
 
-  function persistReportMessage() {
+  async function persistReportMessage() {
     const reportMessage = buildInventoryReportMessage(reportItems);
 
+    // keep local fallback
     if (typeof window !== "undefined") {
       const storageKeyBase = closingRunId ?? countId;
-      window.localStorage.setItem(`inventory_report_message_${storageKeyBase}`, reportMessage);
-      window.localStorage.setItem(`inventory_report_copied_${storageKeyBase}`, "false");
+      window.localStorage.setItem(
+        `inventory_report_message_${storageKeyBase}`,
+        reportMessage
+      );
+      window.localStorage.setItem(
+        `inventory_report_copied_${storageKeyBase}`,
+        "false"
+      );
     }
+
+    // persist to closing run for shared multi-user state
+    if (closingRunId) {
+      try {
+        await fetch(`/api/closing/${closingRunId}`, {
+          method: "PATCH",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            inventory_report_message: reportMessage,
+          }),
+        });
+      } catch (err) {
+        console.error("Failed to persist shared report message", err);
+      }
+    }
+  }
+
+  async function completeInventoryStep() {
+    if (!closingRunId || typeof window === "undefined") {
+      return;
+    }
+
+    const storedUser = window.localStorage.getItem("rc_user");
+
+    if (!storedUser) {
+      return;
+    }
+
+    const user = JSON.parse(storedUser) as { id: string; name: string };
+
+    const closingRes = await fetch(`/api/closing/${closingRunId}?t=${Date.now()}`, {
+      cache: "no-store",
+    });
+    const closingText = await closingRes.text();
+    let closingJson: {
+      error?: string;
+      steps?: Array<{ id: string; tool_key: string | null; is_complete: boolean }>;
+    } = {};
+
+    try {
+      closingJson = closingText ? JSON.parse(closingText) : {};
+    } catch {
+      closingJson = {};
+    }
+
+    if (!closingRes.ok) {
+      throw new Error(closingJson.error || "Failed to load closing checklist");
+    }
+
+    const inventoryStep = (closingJson.steps ?? []).find(
+      (step) => step.tool_key === "inventory_count"
+    );
+
+    if (!inventoryStep) {
+      return;
+    }
+
+    await fetch(`/api/closing/${closingRunId}`, {
+      method: "PATCH",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        step_id: inventoryStep.id,
+        is_complete: true,
+        completed_by_user_id: user.id,
+        completed_by_name: user.name,
+      }),
+    });
   }
 
   async function handleSubmitReport() {
@@ -246,49 +324,8 @@ export default function CountReportPage() {
       }
       const nextStatus = json.count?.status ?? "submitted";
 
-      persistReportMessage();
-
-      if (closingRunId) {
-        const storedUser = window.localStorage.getItem("rc_user");
-
-        if (storedUser) {
-          const user = JSON.parse(storedUser) as { id: string; name: string };
-
-          const closingRes = await fetch(`/api/closing/${closingRunId}`);
-          const closingText = await closingRes.text();
-          let closingJson: {
-            error?: string;
-            steps?: Array<{ id: string; tool_key: string | null; is_complete: boolean }>;
-          } = {};
-
-          try {
-            closingJson = closingText ? JSON.parse(closingText) : {};
-          } catch {
-            closingJson = {};
-          }
-
-          if (closingRes.ok) {
-            const inventoryStep = (closingJson.steps ?? []).find(
-              (step) => step.tool_key === "inventory_count"
-            );
-
-            if (inventoryStep && !inventoryStep.is_complete) {
-              await fetch(`/api/closing/${closingRunId}`, {
-                method: "PATCH",
-                headers: {
-                  "Content-Type": "application/json",
-                },
-                body: JSON.stringify({
-                  step_id: inventoryStep.id,
-                  is_complete: true,
-                  completed_by_user_id: user.id,
-                  completed_by_name: user.name,
-                }),
-              });
-            }
-          }
-        }
-      }
+      await persistReportMessage();
+      await completeInventoryStep();
 
       setCountStatus(nextStatus);
 
@@ -376,7 +413,10 @@ export default function CountReportPage() {
                   return;
                 }
 
-                persistReportMessage();
+                void (async () => {
+                  await persistReportMessage();
+                  await completeInventoryStep();
+                })();
 
                 if (closingRunId && typeof window !== "undefined") {
                   window.sessionStorage.setItem(`inventory_report_scroll_${closingRunId}`, "true");

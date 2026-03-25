@@ -228,7 +228,7 @@ export async function PUT(
 
     const { data: cashCount, error: cashCountError } = await supabase
       .from("opening_cash_counts")
-      .select("id")
+      .select("id, actual_total")
       .eq("opening_run_id", id)
       .order("created_at", { ascending: false })
       .limit(1)
@@ -256,6 +256,36 @@ export async function PUT(
         submitted_at: new Date().toISOString(),
       })
       .eq("id", cashCount.id);
+
+    const { error: openingRunError } = await supabase
+      .from("opening_runs")
+      .update({
+        cash_count_total: Number(total ?? cashCount.actual_total ?? 0),
+      })
+      .eq("id", id);
+
+    if (openingRunError) {
+      throw new Error(openingRunError.message || "Failed to update opening run cash total");
+    }
+
+    const body = await request.json().catch(() => ({}));
+    const countedByUserId = body?.counted_by_user_id as string | undefined;
+    const countedByName = body?.counted_by_name as string | undefined;
+
+    const { error: stepError } = await supabase
+      .from("opening_run_steps")
+      .update({
+        is_complete: true,
+        completed_by_user_id: countedByUserId ?? null,
+        completed_by_name: countedByName ?? null,
+        completed_at: new Date().toISOString(),
+      })
+      .eq("opening_run_id", id)
+      .eq("tool_key", "cash_count");
+
+    if (stepError) {
+      throw new Error(stepError.message || "Failed to complete opening cash step");
+    }
 
     return NextResponse.json({ success: true });
   } catch (err) {

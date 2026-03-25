@@ -1,4 +1,3 @@
-// NEW FILE CONTENT BELOW
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
@@ -57,6 +56,14 @@ function formatStaffTime(date: Date) {
   });
 }
 
+function getLocalDateKey(dateInput: string | Date) {
+  const date = typeof dateInput === "string" ? new Date(dateInput) : dateInput;
+  const year = date.getFullYear();
+  const month = `${date.getMonth() + 1}`.padStart(2, "0");
+  const day = `${date.getDate()}`.padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
 function isAdminUser(user: StoredUser | null) {
   return (user?.role ?? "").trim().toLowerCase() === "admin";
 }
@@ -101,10 +108,14 @@ export default function HomePage() {
 
   const isAdmin = useMemo(() => isAdminUser(currentUser), [currentUser]);
 
-  async function loadRuns() {
+  async function loadRuns(options?: { silent?: boolean }) {
+    const silent = options?.silent ?? false;
+
     try {
       setError(null);
-      setLoading(true);
+      if (!silent) {
+        setLoading(true);
+      }
 
       const supabase = createClient();
 
@@ -134,7 +145,9 @@ export default function HomePage() {
     } catch (err) {
       setError(err instanceof Error ? err.message : "Something went wrong");
     } finally {
-      setLoading(false);
+      if (!silent) {
+        setLoading(false);
+      }
     }
   }
 
@@ -194,21 +207,40 @@ export default function HomePage() {
 
   useEffect(() => {
     void loadRuns();
+
+    const interval = window.setInterval(() => {
+      void loadRuns({ silent: true });
+    }, 2000);
+
+    const handleFocus = () => {
+      if (document.visibilityState === "hidden") return;
+      void loadRuns({ silent: true });
+    };
+
+    window.addEventListener("focus", handleFocus);
+    document.addEventListener("visibilitychange", handleFocus);
+
+    return () => {
+      window.clearInterval(interval);
+      window.removeEventListener("focus", handleFocus);
+      document.removeEventListener("visibilitychange", handleFocus);
+    };
   }, []);
 
   const todayKey = useMemo(() => {
-    const year = now.getFullYear();
-    const month = `${now.getMonth() + 1}`.padStart(2, "0");
-    const day = `${now.getDate()}`.padStart(2, "0");
-    return `${year}-${month}-${day}`;
+    return getLocalDateKey(now);
   }, [now]);
 
   const todaysOpeningRun = useMemo(() => {
-    return openingRuns.find((run) => run.run_date === todayKey) ?? null;
+    return (
+      openingRuns.find((run) => getLocalDateKey(run.created_at) === todayKey) ?? null
+    );
   }, [openingRuns, todayKey]);
 
   const todaysClosingRun = useMemo(() => {
-    return closingRuns.find((run) => run.run_date === todayKey) ?? null;
+    return (
+      closingRuns.find((run) => getLocalDateKey(run.created_at) === todayKey) ?? null
+    );
   }, [closingRuns, todayKey]);
 
   async function handleStaffOpen() {

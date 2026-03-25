@@ -161,6 +161,25 @@ export default function OpeningCashPage() {
     }
   }
 
+  async function flushPendingDenominationSave() {
+    if (!saveTimeoutRef.current) {
+      return;
+    }
+
+    clearTimeout(saveTimeoutRef.current);
+    saveTimeoutRef.current = null;
+
+    await Promise.all(
+      denominations.map((row) =>
+        persistDenominationUpdate(
+          row.id,
+          row.denomination === "coins" ? null : row.quantity ?? 0,
+          Number(row.amount ?? 0)
+        )
+      )
+    );
+  }
+
   function updateDenomination(row: DenominationRow, nextValue: number | null) {
     setError(null);
     const isCoins = row.denomination === "coins";
@@ -207,6 +226,8 @@ export default function OpeningCashPage() {
         typeof window !== "undefined" ? window.localStorage.getItem("rc_user") : null;
       const storedUser = storedUserRaw ? JSON.parse(storedUserRaw) : null;
 
+      await flushPendingDenominationSave();
+
       const res = await fetch(`/api/opening/${openingId}/cash`, {
         method: "PUT",
         headers: {
@@ -235,53 +256,8 @@ export default function OpeningCashPage() {
         setCashCount(json.cashCount);
       }
 
-      if (storedUser) {
-        const openingRes = await fetch(`/api/opening/${openingId}`);
-        const openingText = await openingRes.text();
-        let openingJson: {
-          error?: string;
-          steps?: Array<{ id: string; tool_key: string | null; is_complete: boolean }>;
-        } = {};
-
-        try {
-          openingJson = openingText ? JSON.parse(openingText) : {};
-        } catch {
-          openingJson = {};
-        }
-
-        const cashStep = (openingJson.steps ?? []).find((step) => step.tool_key === "cash_count");
-
-        if (cashStep && !cashStep.is_complete) {
-          const markCompleteRes = await fetch(`/api/opening/${openingId}`, {
-            method: "PATCH",
-            headers: {
-              "Content-Type": "application/json",
-            },
-            body: JSON.stringify({
-              step_id: cashStep.id,
-              is_complete: true,
-              completed_by_user_id: storedUser.id,
-              completed_by_name: storedUser.name,
-            }),
-          });
-
-          const markCompleteText = await markCompleteRes.text();
-          let markCompleteJson: { error?: string } = {};
-
-          try {
-            markCompleteJson = markCompleteText ? JSON.parse(markCompleteText) : {};
-          } catch {
-            markCompleteJson = {};
-          }
-
-          if (!markCompleteRes.ok) {
-            throw new Error(markCompleteJson.error || "Failed to complete cash checklist step");
-          }
-        }
-
-        if (typeof window !== "undefined" && cashStep?.id) {
-          window.sessionStorage.setItem(`opening_step_scroll_${openingId}`, cashStep.id);
-        }
+      if (typeof window !== "undefined") {
+        window.sessionStorage.setItem(`opening_cash_scroll_${openingId}`, "true");
       }
 
       window.location.href = `/opening/${openingId}`;

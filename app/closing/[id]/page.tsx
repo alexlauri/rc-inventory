@@ -12,6 +12,16 @@ type ClosingRunStep = {
   sort_order: number;
 };
 
+type ClosingRun = {
+  id: string;
+  status?: string | null;
+  inventory_report_message?: string | null;
+  cash_count_total?: number | null;
+  report_copied?: boolean | null;
+  report_copied_by_name?: string | null;
+  submitted_by_name?: string | null;
+};
+
 export default function ClosingRunPage() {
   const params = useParams();
   const router = useRouter();
@@ -23,6 +33,7 @@ export default function ClosingRunPage() {
   const [savingStepId, setSavingStepId] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [inventoryReportMessage, setInventoryReportMessage] = useState("");
+  const [cashCountTotal, setCashCountTotal] = useState<number | null>(null);
   const [reportCopied, setReportCopied] = useState(false);
   const [copyingReport, setCopyingReport] = useState(false);
   const [reportCopiedJustNow, setReportCopiedJustNow] = useState(false);
@@ -35,10 +46,12 @@ export default function ClosingRunPage() {
         setError(null);
         setLoading(true);
 
-        const res = await fetch(`/api/closing/${id}`);
+        const res = await fetch(`/api/closing/${id}?t=${Date.now()}`, {
+          cache: "no-store",
+        });
         const text = await res.text();
 
-        let json: { error?: string; steps?: ClosingRunStep[] } = {};
+        let json: { error?: string; steps?: ClosingRunStep[]; run?: ClosingRun | null } = {};
         try {
           json = text ? JSON.parse(text) : {};
         } catch {
@@ -50,6 +63,9 @@ export default function ClosingRunPage() {
         }
 
         setSteps(json.steps ?? []);
+        setInventoryReportMessage(json.run?.inventory_report_message ?? "");
+        setCashCountTotal(json.run?.cash_count_total ?? null);
+        setReportCopied(Boolean(json.run?.report_copied));
       } catch (err) {
         setError(err instanceof Error ? err.message : "Failed to load closing steps");
       } finally {
@@ -62,16 +78,41 @@ export default function ClosingRunPage() {
     }
   }, [id]);
 
+  // lightweight live sync — refresh closing run every 2s
   useEffect(() => {
-    if (typeof window === "undefined") return;
+    if (!id) return;
 
-    const storedMessage = window.localStorage.getItem(`inventory_report_message_${id}`) || "";
-    const storedCopied = window.localStorage.getItem(`inventory_report_copied_${id}`) === "true";
+    const interval = setInterval(async () => {
+      try {
+        const res = await fetch(`/api/closing/${id}?t=${Date.now()}`, {
+          cache: "no-store",
+        });
+        const text = await res.text();
 
-    setInventoryReportMessage(storedMessage);
-    setReportCopied(storedCopied);
-    setReportCopiedJustNow(false);
+        let json: { steps?: ClosingRunStep[]; run?: ClosingRun | null } = {};
+        try {
+          json = text ? JSON.parse(text) : {};
+        } catch {
+          json = {};
+        }
+
+        if (json.steps) {
+          setSteps(json.steps);
+        }
+
+        if (json.run) {
+          setInventoryReportMessage(json.run.inventory_report_message ?? "");
+          setCashCountTotal(json.run.cash_count_total ?? null);
+          setReportCopied(Boolean(json.run.report_copied));
+        }
+      } catch {
+        // silently ignore polling errors
+      }
+    }, 2000);
+
+    return () => clearInterval(interval);
   }, [id]);
+
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -138,19 +179,10 @@ export default function ClosingRunPage() {
     return steps.some((step) => step.tool_key === "inventory_count" && step.is_complete);
   }, [steps]);
 
-  const allStepsComplete = useMemo(() => {
-    const baseStepsComplete = steps.length > 0 && steps.every((step) => step.is_complete);
+  const cashStepComplete = useMemo(() => {
+    return steps.some((step) => step.tool_key === "cash_count" && step.is_complete);
+  }, [steps]);
 
-    if (!baseStepsComplete) {
-      return false;
-    }
-
-    if (!inventoryStepComplete) {
-      return true;
-    }
-
-    return Boolean(inventoryReportMessage) && reportCopied;
-  }, [steps, inventoryStepComplete, inventoryReportMessage, reportCopied]);
 
   const featuredSteps = useMemo(() => {
     const inventoryStep = steps.find((step) => step.tool_key === "inventory_count") ?? null;
@@ -159,11 +191,70 @@ export default function ClosingRunPage() {
     return { inventoryStep, cashStep };
   }, [steps]);
 
+  const hasInventoryStep = Boolean(featuredSteps.inventoryStep);
+  const hasCashStep = Boolean(featuredSteps.cashStep);
+  const reportDateLabel = useMemo(() => {
+    return new Date().toLocaleDateString(undefined, {
+      month: "long",
+      day: "numeric",
+    });
+  }, []);
+
   const checklistSteps = useMemo(() => {
     return steps.filter(
       (step) => step.tool_key !== "inventory_count" && step.tool_key !== "cash_count"
     );
   }, [steps]);
+
+  const combinedReportMessage = useMemo(() => {
+    if (hasInventoryStep && hasCashStep) {
+      if (!inventoryReportMessage || cashCountTotal == null) {
+        return "";
+      }
+
+      return `${reportDateLabel}\n\n${inventoryReportMessage}\n\ncash count: $${cashCountTotal.toFixed(2)}`;
+    }
+
+    if (hasCashStep && cashCountTotal != null) {
+      return `${reportDateLabel} - cash count: $${cashCountTotal.toFixed(2)}`;
+    }
+
+    if (hasInventoryStep && inventoryReportMessage) {
+      return `${reportDateLabel}\n\n${inventoryReportMessage}`;
+    }
+
+    return "";
+  }, [hasInventoryStep, hasCashStep, inventoryReportMessage, cashCountTotal, reportDateLabel]);
+
+  const allStepsComplete = useMemo(() => {
+    const baseStepsComplete = steps.length > 0 && steps.every((step) => step.is_complete);
+
+    if (!baseStepsComplete) {
+      return false;
+    }
+
+    if (!hasInventoryStep && !hasCashStep) {
+      return true;
+    }
+
+    if (hasInventoryStep && !inventoryStepComplete) {
+      return false;
+    }
+
+    if (hasCashStep && !cashStepComplete) {
+      return false;
+    }
+
+    return Boolean(combinedReportMessage) && reportCopied;
+  }, [
+    steps,
+    hasInventoryStep,
+    hasCashStep,
+    inventoryStepComplete,
+    cashStepComplete,
+    combinedReportMessage,
+    reportCopied,
+  ]);
 
   async function handleToggleStep(step: ClosingRunStep) {
     if (step.step_type === "detail") {
@@ -265,20 +356,30 @@ export default function ClosingRunPage() {
 
   async function handleCopyReportMessage() {
     try {
-      if (!inventoryReportMessage) {
+      if (!combinedReportMessage) {
         throw new Error("No report message available yet");
       }
 
       setCopyingReport(true);
       setError(null);
 
-      await navigator.clipboard.writeText(inventoryReportMessage);
+      await navigator.clipboard.writeText(combinedReportMessage);
+      const storedUser = typeof window !== "undefined"
+        ? JSON.parse(window.localStorage.getItem("rc_user") || "null")
+        : null;
+
+      await fetch(`/api/closing/${id}`, {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          report_copied: true,
+          report_copied_by_name: storedUser?.name ?? null,
+        }),
+      });
       setReportCopied(true);
       setReportCopiedJustNow(true);
-
-      if (typeof window !== "undefined") {
-        window.localStorage.setItem(`inventory_report_copied_${id}`, "true");
-      }
 
       window.setTimeout(() => {
         setReportCopiedJustNow(false);
@@ -356,6 +457,10 @@ export default function ClosingRunPage() {
       return "$0.00";
     }
 
+    if (cashCountTotal != null) {
+      return `$${cashCountTotal.toFixed(2)}`;
+    }
+
     return featuredSteps.cashStep.is_complete ? "Complete" : "$0.00";
   }
 
@@ -377,9 +482,19 @@ export default function ClosingRunPage() {
 
   return (
     <main className="mx-auto max-w-md p-4 space-y-6 pb-28">
-      <div className="space-y-1">
-        <h1 className="text-2xl font-semibold">Closing</h1>
-        <p className="text-sm text-gray-500">Tap each item in the checklist to complete it and close out service.</p>
+      <div className="space-y-3">
+        <button
+          type="button"
+          onClick={() => router.push("/")}
+          className="inline-flex items-center text-sm text-gray-500 underline"
+        >
+          Back
+        </button>
+
+        <div className="space-y-1">
+          <h1 className="text-2xl font-semibold">Closing</h1>
+          <p className="text-sm text-gray-500">Tap each item in the checklist to complete it and close out service.</p>
+        </div>
       </div>
 
       {error && (
@@ -388,12 +503,13 @@ export default function ClosingRunPage() {
         </div>
       )}
 
+
       {loading ? (
         <div className="text-sm text-gray-600">Loading checklist...</div>
       ) : (
         <div className="space-y-6">
           {(featuredSteps.inventoryStep || featuredSteps.cashStep) && (
-            <div className="grid grid-cols-2 gap-3">
+            <div className={`grid gap-3 ${hasInventoryStep && hasCashStep ? "grid-cols-2" : "grid-cols-1"}`}>
               {featuredSteps.inventoryStep && (
                 <button
                   type="button"
@@ -440,8 +556,9 @@ export default function ClosingRunPage() {
             </div>
           )}
 
-          {featuredSteps.inventoryStep &&
-            (featuredSteps.inventoryStep.is_complete || Boolean(inventoryReportMessage)) && (
+          {((hasInventoryStep && inventoryStepComplete) || !hasInventoryStep) &&
+            ((hasCashStep && cashStepComplete) || !hasCashStep) &&
+            Boolean(combinedReportMessage) && (
               <div ref={sendReportRef} className="w-full rounded-xl border bg-white p-4 text-left">
                 <div className="flex items-start justify-between gap-3">
                   <div className="space-y-1">
@@ -466,7 +583,7 @@ export default function ClosingRunPage() {
                 <button
                   type="button"
                   onClick={handleCopyReportMessage}
-                  disabled={copyingReport || !inventoryReportMessage}
+                  disabled={copyingReport || !combinedReportMessage}
                   className={`mt-4 w-full rounded-xl border px-4 py-3 font-medium disabled:opacity-50 ${
                     reportCopied ? "border-green-200 bg-green-50 text-green-700" : ""
                   }`}
