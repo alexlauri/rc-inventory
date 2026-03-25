@@ -513,7 +513,7 @@ export default function ClosingRunPage() {
               {featuredSteps.inventoryStep && (
                 <button
                   type="button"
-                  onClick={() => handleToggleStep(featuredSteps.inventoryStep)}
+                  onClick={() => handleToggleStep(featuredSteps.inventoryStep!)}
                   disabled={savingStepId === featuredSteps.inventoryStep.id}
                   className="min-h-[180px] rounded-2xl border bg-white p-5 text-left active:scale-[0.99] disabled:opacity-100"
                 >
@@ -535,7 +535,7 @@ export default function ClosingRunPage() {
               {featuredSteps.cashStep && (
                 <button
                   type="button"
-                  onClick={() => handleToggleStep(featuredSteps.cashStep)}
+                  onClick={() => handleToggleStep(featuredSteps.cashStep!)}
                   disabled={savingStepId === featuredSteps.cashStep.id}
                   className="min-h-[180px] rounded-2xl border bg-white p-5 text-left active:scale-[0.99] disabled:opacity-100"
                 >

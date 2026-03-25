@@ -339,7 +339,7 @@ export default function OpeningRunPage() {
               {featuredSteps.cashStep && (
                 <button
                   type="button"
-                  onClick={() => handleToggleStep(featuredSteps.cashStep)}
+                  onClick={() => handleToggleStep(featuredSteps.cashStep!)}
                   disabled={savingStepId === featuredSteps.cashStep.id}
                   className="min-h-[180px] w-full rounded-2xl border bg-white p-5 text-left shadow-sm disabled:opacity-100"
                 >
