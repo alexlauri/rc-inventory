@@ -2,6 +2,12 @@
 
 import { createRef, useEffect, useMemo, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
+// import FeaturedToolTile from "@/app/components/FeaturedToolTile";
+import ChecklistStepCard from "@/app/components/ChecklistStepCard";
+import StickySubmitButton from "@/app/components/StickySubmitButton";
+// import PageHeader from "@/app/components/PageHeader";
+import ChecklistToolsHeader from "@/app/components/ChecklistToolsHeader";
+import { H2 } from "@/app/components/Type";
 
 type ClosingRunStep = {
   id: string;
@@ -14,6 +20,7 @@ type ClosingRunStep = {
 
 type ClosingRun = {
   id: string;
+  checklist_key?: string | null;
   status?: string | null;
   inventory_report_message?: string | null;
   cash_count_total?: number | null;
@@ -28,6 +35,7 @@ export default function ClosingRunPage() {
   const id = params.id as string;
 
   const [steps, setSteps] = useState<ClosingRunStep[]>([]);
+  const [closingRun, setClosingRun] = useState<ClosingRun | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [savingStepId, setSavingStepId] = useState<string | null>(null);
@@ -63,6 +71,7 @@ export default function ClosingRunPage() {
         }
 
         setSteps(json.steps ?? []);
+        setClosingRun(json.run ?? null);
         setInventoryReportMessage(json.run?.inventory_report_message ?? "");
         setCashCountTotal(json.run?.cash_count_total ?? null);
         setReportCopied(Boolean(json.run?.report_copied));
@@ -101,6 +110,7 @@ export default function ClosingRunPage() {
         }
 
         if (json.run) {
+          setClosingRun(json.run);
           setInventoryReportMessage(json.run.inventory_report_message ?? "");
           setCashCountTotal(json.run.cash_count_total ?? null);
           setReportCopied(Boolean(json.run.report_copied));
@@ -176,12 +186,13 @@ export default function ClosingRunPage() {
 
 
   const inventoryStepComplete = useMemo(() => {
-    return steps.some((step) => step.tool_key === "inventory_count" && step.is_complete);
-  }, [steps]);
+    return Boolean(inventoryReportMessage);
+  }, [inventoryReportMessage]);
 
   const cashStepComplete = useMemo(() => {
     return steps.some((step) => step.tool_key === "cash_count" && step.is_complete);
   }, [steps]);
+
 
 
   const featuredSteps = useMemo(() => {
@@ -191,7 +202,42 @@ export default function ClosingRunPage() {
     return { inventoryStep, cashStep };
   }, [steps]);
 
-  const hasInventoryStep = Boolean(featuredSteps.inventoryStep);
+  const hasInventoryStep = true;
+  async function handleRunInventory() {
+    try {
+      setError(null);
+      setSavingStepId("inventory_count");
+
+      const res = await fetch("/api/counts", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          closing_run_id: id,
+        }),
+      });
+
+      const text = await res.text();
+      let json: { error?: string; count?: { id: string } } = {};
+
+      try {
+        json = text ? JSON.parse(text) : {};
+      } catch {
+        json = {};
+      }
+
+      if (!res.ok || !json.count?.id) {
+        throw new Error(json.error || "Failed to create inventory count");
+      }
+
+      router.push(`/counts/${json.count.id}?closing_run_id=${id}`);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to create inventory count");
+    } finally {
+      setSavingStepId(null);
+    }
+  }
   const hasCashStep = Boolean(featuredSteps.cashStep);
   const reportDateLabel = useMemo(() => {
     return new Date().toLocaleDateString(undefined, {
@@ -206,8 +252,9 @@ export default function ClosingRunPage() {
     );
   }, [steps]);
 
+  const isLastDayClosing = closingRun?.checklist_key === "last_day_closing";
   const combinedReportMessage = useMemo(() => {
-    if (hasInventoryStep && hasCashStep) {
+    if (isLastDayClosing) {
       if (!inventoryReportMessage || cashCountTotal == null) {
         return "";
       }
@@ -215,16 +262,21 @@ export default function ClosingRunPage() {
       return `${reportDateLabel}\n\n${inventoryReportMessage}\n\ncash count: $${cashCountTotal.toFixed(2)}`;
     }
 
-    if (hasCashStep && cashCountTotal != null) {
+    if (cashCountTotal != null) {
       return `${reportDateLabel} - cash count: $${cashCountTotal.toFixed(2)}`;
     }
 
-    if (hasInventoryStep && inventoryReportMessage) {
-      return `${reportDateLabel}\n\n${inventoryReportMessage}`;
-    }
-
     return "";
-  }, [hasInventoryStep, hasCashStep, inventoryReportMessage, cashCountTotal, reportDateLabel]);
+  }, [isLastDayClosing, inventoryReportMessage, cashCountTotal, reportDateLabel]);
+
+
+  const canSendReport = useMemo(() => {
+    if (!cashStepComplete) return false;
+    if (isLastDayClosing) {
+      return inventoryStepComplete && Boolean(combinedReportMessage);
+    }
+    return cashCountTotal != null && Boolean(combinedReportMessage);
+  }, [cashStepComplete, isLastDayClosing, inventoryStepComplete, cashCountTotal, combinedReportMessage]);
 
   const allStepsComplete = useMemo(() => {
     const baseStepsComplete = steps.length > 0 && steps.every((step) => step.is_complete);
@@ -464,38 +516,65 @@ export default function ClosingRunPage() {
     return featuredSteps.cashStep.is_complete ? "Complete" : "$0.00";
   }
 
-  function renderStatusPill(step: ClosingRunStep) {
-    const complete = isStepVisuallyComplete(step);
-
-    return (
-      <div
-        className={`inline-flex rounded-full px-2.5 py-1 text-xs font-medium ${
-          complete
-            ? "border border-green-200 bg-green-50 text-green-700"
-            : "border border-gray-200 bg-gray-50 text-gray-600"
-        }`}
-      >
-        {savingStepId === step.id ? "Saving..." : complete ? "Complete" : "Pending"}
-      </div>
-    );
-  }
 
   return (
-    <main className="mx-auto max-w-md p-4 space-y-6 pb-28">
-      <div className="space-y-3">
-        <button
-          type="button"
-          onClick={() => router.push("/")}
-          className="inline-flex items-center text-sm text-gray-500 underline"
-        >
-          Back
-        </button>
-
-        <div className="space-y-1">
-          <h1 className="text-2xl font-semibold">Closing</h1>
-          <p className="text-sm text-gray-500">Tap each item in the checklist to complete it and close out service.</p>
-        </div>
-      </div>
+    <main
+      className="min-h-screen w-full space-y-6 px-6 pb-28 pt-4"
+      style={{ backgroundColor: "var(--color-surface-page, #F7F3EB)" }}
+    >
+      <ChecklistToolsHeader
+        title="Closing"
+        backHref="/"
+        onRunInventory={() => void handleRunInventory()}
+        onCountCash={
+          featuredSteps.cashStep
+            ? () => {
+                void handleToggleStep(featuredSteps.cashStep!);
+              }
+            : undefined
+        }
+        onSendReport={() => void handleCopyReportMessage()}
+        inventoryStatus={
+          savingStepId === "inventory_count"
+            ? "saving"
+            : inventoryStepComplete
+            ? "complete"
+            : "pending"
+        }
+        cashStatus={
+          featuredSteps.cashStep
+            ? savingStepId === featuredSteps.cashStep.id
+              ? "saving"
+              : isStepVisuallyComplete(featuredSteps.cashStep)
+              ? "complete"
+              : "pending"
+            : "pending"
+        }
+        reportStatus={
+          copyingReport
+            ? "saving"
+            : reportCopied
+            ? "complete"
+            : "pending"
+        }
+        inventoryLabel={getInventoryProgressLabel()}
+        cashLabel={getCashProgressLabel()}
+        reportLabel={
+          copyingReport
+            ? "Copying..."
+            : reportCopiedJustNow
+            ? "Copied!"
+            : reportCopied
+            ? "Copied"
+            : "Copy Message"
+        }
+        showInventory={true}
+        showCash={Boolean(featuredSteps.cashStep)}
+        showReport={canSendReport}
+        inventoryDisabled={savingStepId === "inventory_count"}
+        cashDisabled={featuredSteps.cashStep ? savingStepId === featuredSteps.cashStep.id : false}
+        reportDisabled={copyingReport || !canSendReport}
+      />
 
       {error && (
         <div className="rounded-xl border border-red-300 bg-red-50 p-4 text-sm text-red-700">
@@ -508,99 +587,11 @@ export default function ClosingRunPage() {
         <div className="text-sm text-gray-600">Loading checklist...</div>
       ) : (
         <div className="space-y-6">
-          {(featuredSteps.inventoryStep || featuredSteps.cashStep) && (
-            <div className={`grid gap-3 ${hasInventoryStep && hasCashStep ? "grid-cols-2" : "grid-cols-1"}`}>
-              {featuredSteps.inventoryStep && (
-                <button
-                  type="button"
-                  onClick={() => handleToggleStep(featuredSteps.inventoryStep!)}
-                  disabled={savingStepId === featuredSteps.inventoryStep.id}
-                  className="min-h-[180px] rounded-2xl border bg-white p-5 text-left active:scale-[0.99] disabled:opacity-100"
-                >
-                  <div className="flex h-full flex-col justify-between">
-                    <div className="space-y-1">
-                      <div className="text-2xl font-semibold">Run Inventory</div>
-                    </div>
-
-                    <div className="space-y-4">
-                      <div className="text-5xl font-semibold leading-none">
-                        {getInventoryProgressLabel()}
-                      </div>
-                      {renderStatusPill(featuredSteps.inventoryStep)}
-                    </div>
-                  </div>
-                </button>
-              )}
-
-              {featuredSteps.cashStep && (
-                <button
-                  type="button"
-                  onClick={() => handleToggleStep(featuredSteps.cashStep!)}
-                  disabled={savingStepId === featuredSteps.cashStep.id}
-                  className="min-h-[180px] rounded-2xl border bg-white p-5 text-left active:scale-[0.99] disabled:opacity-100"
-                >
-                  <div className="flex h-full flex-col justify-between">
-                    <div className="space-y-1">
-                      <div className="text-2xl font-semibold">Count cash</div>
-                    </div>
-
-                    <div className="space-y-4">
-                      <div className="text-5xl font-semibold leading-none">
-                        {getCashProgressLabel()}
-                      </div>
-                      {renderStatusPill(featuredSteps.cashStep)}
-                    </div>
-                  </div>
-                </button>
-              )}
-            </div>
-          )}
-
-          {((hasInventoryStep && inventoryStepComplete) || !hasInventoryStep) &&
-            ((hasCashStep && cashStepComplete) || !hasCashStep) &&
-            Boolean(combinedReportMessage) && (
-              <div ref={sendReportRef} className="w-full rounded-xl border bg-white p-4 text-left">
-                <div className="flex items-start justify-between gap-3">
-                  <div className="space-y-1">
-                    <div className="font-medium">Send Report</div>
-                    <div className="text-sm text-gray-500">
-                      Copy the report and text it to Nikki and Alex.
-                    </div>
-                  </div>
-
-                  <div
-                    className={`rounded-full px-2.5 py-1 text-xs font-medium ${
-                      reportCopied
-                        ? "border border-green-200 bg-green-50 text-green-700"
-                        : "border border-gray-200 bg-gray-50 text-gray-600"
-                    }`}
-                  >
-                    {reportCopied ? "Complete" : "Pending"}
-                  </div>
-                </div>
-
-
-                <button
-                  type="button"
-                  onClick={handleCopyReportMessage}
-                  disabled={copyingReport || !combinedReportMessage}
-                  className={`mt-4 w-full rounded-xl border px-4 py-3 font-medium disabled:opacity-50 ${
-                    reportCopied ? "border-green-200 bg-green-50 text-green-700" : ""
-                  }`}
-                >
-                  {copyingReport
-                    ? "Copying..."
-                    : reportCopiedJustNow
-                    ? "Copied!"
-                    : reportCopied
-                    ? "Copied"
-                    : "Copy Message"}
-                </button>
-              </div>
-            )}
 
           <div className="space-y-3">
-            <h2 className="text-xl font-semibold">Checklist</h2>
+            <H2 className="mb-5 pt-3 text-[var(--color-primary,#004DEA)]">
+              Closing Checklist
+            </H2>
 
             {checklistSteps.map((step) => {
               if (!stepRefs.current[step.id]) {
@@ -609,25 +600,26 @@ export default function ClosingRunPage() {
 
               return (
                 <div key={step.id} ref={stepRefs.current[step.id]} className="space-y-3">
-                  <button
-                    type="button"
+                  <ChecklistStepCard
+                    title={step.label_snapshot}
+                    subtitle={
+                      step.step_type === "detail"
+                        ? "Tap to open details"
+                        : step.tool_key
+                        ? "Tap to open tool"
+                        : null
+                    }
+                    status={
+                      savingStepId === step.id
+                        ? "saving"
+                        : isStepVisuallyComplete(step)
+                        ? "complete"
+                        : "pending"
+                    }
                     onClick={() => handleToggleStep(step)}
                     disabled={savingStepId === step.id}
-                    className="w-full rounded-xl border bg-white p-4 text-left active:scale-[0.99] disabled:opacity-100"
-                  >
-                    <div className="flex items-start justify-between gap-3">
-                      <div className="space-y-1">
-                        <div className="font-medium">{step.label_snapshot}</div>
-                        {step.step_type === "detail" ? (
-                          <div className="text-sm text-gray-500">Tap to open details</div>
-                        ) : step.tool_key ? (
-                          <div className="text-sm text-gray-500">Tap to open tool</div>
-                        ) : null}
-                      </div>
-
-                      {renderStatusPill(step)}
-                    </div>
-                  </button>
+                    activeScale
+                  />
                 </div>
               );
             })}
@@ -636,20 +628,11 @@ export default function ClosingRunPage() {
         </div>
       )}
       {!loading && (
-        <div className="pointer-events-none fixed inset-x-0 bottom-0 z-40">
-          <div className="mx-auto flex max-w-md justify-center px-4 pb-4">
-            <div className="pointer-events-auto w-full rounded-2xl bg-white/95 p-3 shadow-lg ring-1 ring-black/5 backdrop-blur">
-              <button
-                type="button"
-                onClick={submitClosingChecklist}
-                disabled={submitting || !allStepsComplete}
-                className="w-full rounded-xl bg-black px-4 py-3 text-white font-medium shadow-sm transition active:scale-[0.99] disabled:opacity-50"
-              >
-                {submitting ? "Submitting..." : "Submit Closing Checklist"}
-              </button>
-            </div>
-          </div>
-        </div>
+        <StickySubmitButton
+          label={submitting ? "Submitting..." : "Submit Closing Checklist"}
+          onClick={submitClosingChecklist}
+          disabled={submitting || !allStepsComplete}
+        />
       )}
     </main>
   );

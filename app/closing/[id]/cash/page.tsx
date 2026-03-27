@@ -1,8 +1,10 @@
 "use client";
 
-import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import { useParams } from "next/navigation";
+import PageHeader from "@/app/components/PageHeader";
+import StickySubmitButton from "@/app/components/StickySubmitButton";
+import CashCountForm from "@/app/components/CashCountForm";
 
 type CashDenomination = {
   id: string;
@@ -279,17 +281,8 @@ export default function ClosingCashPage() {
 
   return (
     <main className="mx-auto max-w-md p-4 space-y-6 pb-28">
-      <div className="space-y-1">
-        <Link
-          href={`/closing/${id}`}
-          className="text-sm text-gray-600 underline"
-        >
-          ← Back to Closing
-        </Link>
-        <h1 className="text-2xl font-semibold">Count Cash</h1>
-        <p className="text-sm text-gray-500">
-          Count each denomination to close out the drawer.
-        </p>
+      <div className="space-y-3">
+        <PageHeader title="Count Cash" backHref={`/closing/${id}`} />
       </div>
 
       {error && (
@@ -301,110 +294,30 @@ export default function ClosingCashPage() {
       {loading ? (
         <div className="text-sm text-gray-600">Loading cash count...</div>
       ) : (
-        <>
-          <div className="rounded-xl border bg-white p-4">
-            <div className="text-sm text-gray-500">Actual Total</div>
-            <div className="mt-1 text-2xl font-semibold">
-              ${Number(cashCount?.actual_total ?? 0).toFixed(2)}
-            </div>
-          </div>
+        <CashCountForm
+          actualTotal={Number(cashCount?.actual_total ?? 0)}
+          denominations={denominations}
+          onUpdateDenomination={(row, nextValue) => {
+            if (row.denomination === "coins") {
+              const nextAmount = Math.max(0, Number(nextValue ?? 0));
+              applyLocalDenominationUpdate(row.id, null, nextAmount);
+              queueDenominationSave(row.id, null, nextAmount);
+              return;
+            }
 
-          <div className="space-y-3">
-            {denominations.map((row) => (
-              <div
-                key={row.id}
-                className="rounded-xl border bg-white p-4"
-              >
-                <div className="flex items-center justify-between gap-4">
-                  <div>
-                    <div className="font-medium">{row.denomination}</div>
-                    <div className="text-sm text-gray-500">
-                      {row.denomination === "coins"
-                        ? "Enter total coin amount"
-                        : `$${row.unit_value.toFixed(2)} each`}
-                    </div>
-                  </div>
-
-                  {row.denomination === "coins" ? (
-                    <input
-                      type="number"
-                      inputMode="decimal"
-                      step="0.01"
-                      min={0}
-                      value={Number(row.amount ?? 0)}
-                      onChange={(e) => {
-                        const nextAmount = Math.max(0, Number(e.target.value) || 0);
-                        applyLocalDenominationUpdate(row.id, null, nextAmount);
-                        queueDenominationSave(row.id, null, nextAmount);
-                      }}
-                      className="w-24 rounded border px-2 py-1 text-right text-sm"
-                    />
-                  ) : (
-                    <div className="flex items-center gap-3">
-                      <button
-                        type="button"
-                        onClick={() => {
-                          const currentQuantity = row.quantity ?? 0;
-                          const nextQuantity = Math.max(0, currentQuantity - 1);
-                          const nextAmount = nextQuantity * row.unit_value;
-                          applyLocalDenominationUpdate(row.id, nextQuantity, nextAmount);
-                          queueDenominationSave(row.id, nextQuantity, nextAmount);
-                        }}
-                        className="flex h-9 w-9 items-center justify-center rounded-full border text-lg"
-                      >
-                        −
-                      </button>
-
-                      <input
-                        type="number"
-                        inputMode="numeric"
-                        min={0}
-                        value={row.quantity ?? 0}
-                        onChange={(e) => {
-                          const nextQuantity = parseQuantityInput(e.target.value);
-                          const nextAmount = nextQuantity * row.unit_value;
-                          applyLocalDenominationUpdate(row.id, nextQuantity, nextAmount);
-                          queueDenominationSave(row.id, nextQuantity, nextAmount);
-                        }}
-                        className="w-16 rounded border px-2 py-1 text-center text-sm"
-                      />
-
-                      <button
-                        type="button"
-                        onClick={() => {
-                          const currentQuantity = row.quantity ?? 0;
-                          const nextQuantity = currentQuantity + 1;
-                          const nextAmount = nextQuantity * row.unit_value;
-                          applyLocalDenominationUpdate(row.id, nextQuantity, nextAmount);
-                          queueDenominationSave(row.id, nextQuantity, nextAmount);
-                        }}
-                        className="flex h-9 w-9 items-center justify-center rounded-full border text-lg"
-                      >
-                        +
-                      </button>
-                    </div>
-                  )}
-                </div>
-              </div>
-            ))}
-          </div>
-        </>
+            const nextQuantity = Math.max(0, Number(nextValue ?? 0));
+            const nextAmount = nextQuantity * row.unit_value;
+            applyLocalDenominationUpdate(row.id, nextQuantity, nextAmount);
+            queueDenominationSave(row.id, nextQuantity, nextAmount);
+          }}
+        />
       )}
       {!loading && (
-        <div className="pointer-events-none fixed inset-x-0 bottom-0 z-40">
-          <div className="mx-auto flex max-w-md justify-center px-4 pb-4">
-            <div className="pointer-events-auto w-full rounded-2xl bg-white/95 p-3 shadow-lg ring-1 ring-black/5 backdrop-blur">
-              <button
-                type="button"
-                onClick={submitCashCount}
-                disabled={submitting}
-                className="w-full rounded-xl bg-black px-4 py-3 text-sm font-medium text-white disabled:opacity-50"
-              >
-                {submitting ? "Saving..." : "Save Cash Count"}
-              </button>
-            </div>
-          </div>
-        </div>
+        <StickySubmitButton
+          label={submitting ? "Saving..." : "Save Cash Count"}
+          onClick={submitCashCount}
+          disabled={submitting}
+        />
       )}
     </main>
   );

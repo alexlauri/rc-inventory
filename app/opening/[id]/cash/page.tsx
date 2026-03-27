@@ -1,7 +1,10 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useParams, useRouter } from "next/navigation";
+import { useParams } from "next/navigation";
+import PageHeader from "@/app/components/PageHeader";
+import StickySubmitButton from "@/app/components/StickySubmitButton";
+import CashCountForm from "@/app/components/CashCountForm";
 
 type CashCount = {
   id: string;
@@ -29,7 +32,6 @@ type CashResponse = {
 
 export default function OpeningCashPage() {
   const params = useParams();
-  const router = useRouter();
   const openingId = params.id as string;
 
   const [cashCount, setCashCount] = useState<CashCount | null>(null);
@@ -268,25 +270,10 @@ export default function OpeningCashPage() {
     }
   }
 
-  if (loading || initializing) {
-    return (
-      <div className="p-4">
-        <div className="text-sm text-gray-500">Loading cash count…</div>
-      </div>
-    );
-  }
 
   return (
-    <div className="p-4 pb-32 space-y-4">
-      <button
-        type="button"
-        onClick={() => router.push(`/opening/${openingId}`)}
-        className="text-sm text-gray-500"
-      >
-        ← Back
-      </button>
-
-      <h1 className="text-2xl font-semibold">Count cash</h1>
+    <main className="mx-auto max-w-md p-4 space-y-6 pb-28">
+      <PageHeader title="Count Cash" backHref={`/opening/${openingId}`} />
 
       {error && (
         <div className="rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-700">
@@ -294,85 +281,25 @@ export default function OpeningCashPage() {
         </div>
       )}
 
-      <div className="rounded-2xl border bg-white p-4 shadow-sm">
-        <div className="text-sm text-gray-500">Actual Total</div>
-        <div className="mt-1 text-3xl font-semibold">${actualTotal.toFixed(2)}</div>
-      </div>
+      {loading || initializing ? (
+        <div className="text-sm text-gray-500">Loading cash count…</div>
+      ) : (
+        <>
+          <CashCountForm
+            actualTotal={actualTotal}
+            denominations={denominations}
+            onUpdateDenomination={(row, nextValue) => {
+              updateDenomination(row, nextValue);
+            }}
+          />
 
-      <div className="space-y-3">
-        {denominations.map((row) => {
-          const isCoins = row.denomination === "coins";
-          const quantityValue = row.quantity ?? 0;
-          const amountValue = Number(row.amount ?? 0);
-
-          return (
-            <div key={row.id} className="rounded-2xl border bg-white p-4 shadow-sm">
-              <div className="flex items-center justify-between gap-3">
-                <div>
-                  <div className="font-medium">{row.denomination}</div>
-                  <div className="text-sm text-gray-500">
-                    {isCoins ? "Enter dollar value" : `${Number(row.unit_value).toFixed(2)} each`}
-                  </div>
-                </div>
-
-                {isCoins ? (
-                  <input
-                    type="number"
-                    inputMode="decimal"
-                    step="0.01"
-                    min="0"
-                    value={amountValue}
-                    onChange={(event) => {
-                      const next = Number(event.target.value || 0);
-                      void updateDenomination(row, next);
-                    }}
-                    className="w-28 rounded-lg border px-3 py-2 text-right"
-                  />
-                ) : (
-                  <div className="flex items-center gap-2">
-                    <button
-                      type="button"
-                      onClick={() => void updateDenomination(row, quantityValue - 1)}
-                      className="h-9 w-9 rounded-lg border"
-                    >
-                      −
-                    </button>
-                    <input
-                      type="number"
-                      inputMode="numeric"
-                      min="0"
-                      value={quantityValue}
-                      onChange={(event) => {
-                        const next = Number(event.target.value || 0);
-                        void updateDenomination(row, next);
-                      }}
-                      className="w-16 rounded-lg border px-2 py-2 text-center"
-                    />
-                    <button
-                      type="button"
-                      onClick={() => void updateDenomination(row, quantityValue + 1)}
-                      className="h-9 w-9 rounded-lg border"
-                    >
-                      +
-                    </button>
-                  </div>
-                )}
-              </div>
-            </div>
-          );
-        })}
-      </div>
-
-      <div className="fixed bottom-0 left-0 right-0 border-t bg-white p-4">
-        <button
-          type="button"
-          onClick={() => void submitCashCount()}
-          disabled={submitting}
-          className="w-full rounded-xl bg-black py-3 font-medium text-white disabled:opacity-50"
-        >
-          {submitting ? "Saving..." : "Save cash count"}
-        </button>
-      </div>
-    </div>
+          <StickySubmitButton
+            label={submitting ? "Saving..." : "Save Cash Count"}
+            onClick={() => void submitCashCount()}
+            disabled={submitting}
+          />
+        </>
+      )}
+    </main>
   );
 }

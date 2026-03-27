@@ -1,8 +1,12 @@
 "use client";
 
 import { createRef, useEffect, useMemo, useRef, useState } from "react";
-import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
+import ChecklistStepCard from "@/app/components/ChecklistStepCard";
+import StickySubmitButton from "@/app/components/StickySubmitButton";
+import { H2 } from "@/app/components/Type";
+
+import ChecklistToolsHeader from "@/app/components/ChecklistToolsHeader";
 
 type OpeningRunStep = {
   id: string;
@@ -311,14 +315,62 @@ export default function OpeningRunPage() {
   }
 
   return (
-    <main className="mx-auto max-w-md space-y-6 p-4 pb-28">
-      <div className="space-y-1 pt-4">
-        <Link href="/" className="text-sm text-gray-600 underline">
-          ← Back to Operations
-        </Link>
-        <h1 className="text-3xl font-semibold tracking-tight">Opening Checklist</h1>
-        <p className="text-sm text-gray-500">Tap each item in the checklist to complete it and get ready for service.</p>
-      </div>
+    <main
+      className="min-h-screen w-full space-y-6 px-6 pb-28 pt-4"
+      style={{ backgroundColor: "var(--color-surface-page, #F7F3EB)" }}
+    >
+      <ChecklistToolsHeader
+        title="Opening"
+        backHref="/"
+        onRunInventory={() => {}}
+        onCountCash={
+          featuredSteps.cashStep
+            ? () => {
+                void handleToggleStep(featuredSteps.cashStep!);
+              }
+            : undefined
+        }
+        onSendReport={() => void handleCopyReportMessage()}
+        inventoryStatus="pending"
+        cashStatus={
+          featuredSteps.cashStep
+            ? savingStepId === featuredSteps.cashStep.id
+              ? "saving"
+              : featuredSteps.cashStep.is_complete
+              ? "complete"
+              : "pending"
+            : "pending"
+        }
+        reportStatus={
+          copyingReport
+            ? "saving"
+            : reportCopied
+            ? "complete"
+            : "pending"
+        }
+        inventoryLabel=""
+        cashLabel={
+          cashCountTotal != null
+            ? `$${cashCountTotal.toFixed(2)}`
+            : featuredSteps.cashStep?.is_complete
+            ? "Complete"
+            : "$0.00"
+        }
+        reportLabel={
+          copyingReport
+            ? "Copying..."
+            : reportCopiedJustNow
+            ? "Copied!"
+            : reportCopied
+            ? "Copied"
+            : "Copy Message"
+        }
+        showInventory={false}
+        showCash={Boolean(featuredSteps.cashStep)}
+        showReport={Boolean(featuredSteps.cashStep && featuredSteps.cashStep.is_complete && cashCountTotal != null)}
+        cashDisabled={featuredSteps.cashStep ? savingStepId === featuredSteps.cashStep.id : false}
+        reportDisabled={copyingReport || !openingReportMessage}
+      />
 
       {error && (
         <div className="rounded-xl border border-red-300 bg-red-50 p-4 text-sm text-red-700">
@@ -336,84 +388,10 @@ export default function OpeningRunPage() {
             </div>
           ) : (
             <>
-              {featuredSteps.cashStep && (
-                <button
-                  type="button"
-                  onClick={() => handleToggleStep(featuredSteps.cashStep!)}
-                  disabled={savingStepId === featuredSteps.cashStep.id}
-                  className="min-h-[180px] w-full rounded-2xl border bg-white p-5 text-left shadow-sm disabled:opacity-100"
-                >
-                  <div className="flex h-full flex-col justify-between gap-6">
-                    <div className="space-y-1">
-                      <div className="text-2xl font-semibold">Count cash</div>
-                    </div>
-
-                    <div className="space-y-4">
-                      <div className="text-5xl font-semibold leading-none">
-                        {cashCountTotal != null
-                          ? `$${cashCountTotal.toFixed(2)}`
-                          : featuredSteps.cashStep.is_complete
-                          ? "Complete"
-                          : "$0.00"}
-                      </div>
-                      <div
-                        className={`inline-flex rounded-full border px-2.5 py-1 text-xs font-medium ${
-                          featuredSteps.cashStep.is_complete
-                            ? "border-green-200 bg-green-50 text-green-700"
-                            : "border-gray-200 bg-gray-50 text-gray-600"
-                        }`}
-                      >
-                        {savingStepId === featuredSteps.cashStep.id
-                          ? "Saving..."
-                          : featuredSteps.cashStep.is_complete
-                          ? "Complete"
-                          : "Pending"}
-                      </div>
-                    </div>
-                  </div>
-                </button>
-              )}
-
-              {featuredSteps.cashStep && featuredSteps.cashStep.is_complete && cashCountTotal != null && (
-                <div className="rounded-2xl border bg-white p-5 text-left shadow-sm">
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="space-y-1">
-                      <div className="text-2xl font-semibold">Send Report</div>
-                      <div className="text-sm text-gray-500">Copy the report and text it to Nikki and Alex.</div>
-                    </div>
-
-                    <div
-                      className={`inline-flex rounded-full border px-2.5 py-1 text-xs font-medium ${
-                        reportCopied
-                          ? "border-green-200 bg-green-50 text-green-700"
-                          : "border-gray-200 bg-gray-50 text-gray-600"
-                      }`}
-                    >
-                      {reportCopied ? "Complete" : "Pending"}
-                    </div>
-                  </div>
-
-                  <button
-                    type="button"
-                    onClick={handleCopyReportMessage}
-                    disabled={copyingReport || !openingReportMessage}
-                    className={`mt-4 w-full rounded-xl border px-4 py-3 font-medium disabled:opacity-50 ${
-                      reportCopied ? "border-green-200 bg-green-50 text-green-700" : ""
-                    }`}
-                  >
-                    {copyingReport
-                      ? "Copying..."
-                      : reportCopiedJustNow
-                      ? "Copied!"
-                      : reportCopied
-                      ? "Copied"
-                      : "Copy Message"}
-                  </button>
-                </div>
-              )}
-
               <div className="space-y-3">
-                <h2 className="text-xl font-semibold">Checklist</h2>
+                <H2 className="mb-5 pt-3 text-[var(--color-primary,#004DEA)]">
+                  Opening Checklist
+                </H2>
 
                 {checklistSteps.map((step) => {
                   if (!stepRefs.current[step.id]) {
@@ -422,39 +400,26 @@ export default function OpeningRunPage() {
 
                   return (
                     <div key={step.id} ref={stepRefs.current[step.id]}>
-                      <button
-                        type="button"
+                      <ChecklistStepCard
+                        title={step.label_snapshot}
+                        subtitle={
+                          step.step_type === "detail"
+                            ? "Tap to open details"
+                            : step.tool_key
+                            ? "Tap to open tool"
+                            : null
+                        }
+                        status={
+                          savingStepId === step.id
+                            ? "saving"
+                            : step.is_complete
+                            ? "complete"
+                            : "pending"
+                        }
                         onClick={() => handleToggleStep(step)}
                         disabled={savingStepId === step.id}
-                        className={`w-full rounded-2xl border bg-white p-4 text-left shadow-sm ${
-                          !step.tool_key ? "active:scale-[0.99]" : ""
-                        } disabled:opacity-100`}
-                      >
-                        <div className="flex items-start justify-between gap-3">
-                          <div className="space-y-1">
-                            <div className="font-medium">{step.label_snapshot}</div>
-                            {step.step_type === "detail" ? (
-                              <div className="text-sm text-gray-500">Tap to open details</div>
-                            ) : step.tool_key ? (
-                              <div className="text-sm text-gray-500">Tap to open tool</div>
-                            ) : null}
-                          </div>
-
-                          <div
-                            className={`rounded-full border px-2.5 py-1 text-xs font-medium ${
-                              step.is_complete
-                                ? "border-green-200 bg-green-50 text-green-700"
-                                : "border-gray-200 bg-gray-50 text-gray-600"
-                            }`}
-                          >
-                            {savingStepId === step.id
-                              ? "Saving..."
-                              : step.is_complete
-                              ? "Complete"
-                              : "Pending"}
-                          </div>
-                        </div>
-                      </button>
+                        activeScale={!step.tool_key}
+                      />
                     </div>
                   );
                 })}
@@ -464,20 +429,11 @@ export default function OpeningRunPage() {
         </div>
       )}
       {!loading && (
-        <div className="pointer-events-none fixed inset-x-0 bottom-0 z-40">
-          <div className="mx-auto flex max-w-md justify-center px-4 pb-4">
-            <div className="pointer-events-auto w-full rounded-2xl bg-white/95 p-3 shadow-lg ring-1 ring-black/5 backdrop-blur">
-              <button
-                type="button"
-                onClick={submitOpeningChecklist}
-                disabled={submitting || !allStepsComplete}
-                className="w-full rounded-xl bg-black px-4 py-3 text-white font-medium shadow-sm transition active:scale-[0.99] disabled:opacity-50"
-              >
-                {submitting ? "Submitting..." : "Submit Opening Checklist"}
-              </button>
-            </div>
-          </div>
-        </div>
+        <StickySubmitButton
+          label={submitting ? "Submitting..." : "Submit Opening Checklist"}
+          onClick={submitOpeningChecklist}
+          disabled={submitting || !allStepsComplete}
+        />
       )}
     </main>
   );

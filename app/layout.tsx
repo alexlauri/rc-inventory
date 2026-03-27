@@ -4,6 +4,17 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import "./globals.css";
+import localFont from "next/font/local";
+
+const cabinet = localFont({
+  src: [
+    { path: "../public/fonts/CabinetGrotesk-Regular.woff2", weight: "400", style: "normal" },
+    { path: "../public/fonts/CabinetGrotesk-Medium.woff2", weight: "500", style: "normal" },
+    { path: "../public/fonts/CabinetGrotesk-Bold.woff2", weight: "700", style: "normal" },
+    { path: "../public/fonts/CabinetGrotesk-Black.woff2", weight: "900", style: "normal" },
+  ],
+  variable: "--font-cabinet",
+});
 
 type LoggedInUser = {
   id: string;
@@ -21,6 +32,8 @@ export default function RootLayout({
   const [checkedAuth, setCheckedAuth] = useState(false);
   const [user, setUser] = useState<LoggedInUser | null>(null);
   const isAdmin = (user?.role ?? "").trim().toLowerCase() === "admin";
+  const showGlobalHeader = pathname === "/" && isAdmin;
+  const shellClassName = "min-h-screen w-full";
 
   useEffect(() => {
     const stored = window.localStorage.getItem("rc_user");
@@ -68,9 +81,9 @@ export default function RootLayout({
 
   return (
     <html lang="en">
-      <body className="bg-white text-black">
-        <div className="mx-auto min-h-screen max-w-md">
-          {pathname !== "/login" && (
+      <body className={`${cabinet.variable} bg-white text-black`}>
+        <div className={shellClassName}>
+          {pathname !== "/login" && showGlobalHeader && (
             <header className="sticky top-0 z-10 border-b bg-white">
               <div className="flex items-center justify-between px-4 py-3">
                 <div className="flex items-center gap-4">

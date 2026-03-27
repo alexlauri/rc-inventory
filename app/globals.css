@@ -3,11 +3,28 @@
 :root {
   --background: #ffffff;
   --foreground: #171717;
+
+  /* brand colors */
+  --color-primary: #004DEA;
+  --color-cream: #F7F3EB;
+  --color-card-active: #CFD8E9;
+  --color-divider: rgba(255,255,255,0.3);
+
+  /* semantic surfaces */
+  --surface-page: var(--color-cream);
+  --surface-primary: var(--color-primary);
+  --surface-active: var(--color-card-active);
 }
 
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
+  --color-primary: var(--color-primary);
+  --color-cream: var(--color-cream);
+  --color-card-active: var(--color-card-active);
+  --color-surface-page: var(--surface-page);
+  --color-surface-primary: var(--surface-primary);
+  --color-surface-active: var(--surface-active);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
 }

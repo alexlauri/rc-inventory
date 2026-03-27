@@ -2,6 +2,9 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
+import PageHeader from "@/app/components/PageHeader";
+import ChecklistStepCard from "@/app/components/ChecklistStepCard";
+import { Subtle } from "@/app/components/Type";
 
 type RunSubstep = {
   id: string;
@@ -135,47 +138,38 @@ export default function OpeningStepDetailPage() {
   }, [allComplete, openingId, stepId]);
 
   return (
-    <div className="p-4 space-y-4 pb-32">
-      <button
-        onClick={goBackToChecklist}
-        className="text-sm text-gray-500"
-      >
-        ← Back
-      </button>
-
-      <h1 className="text-xl font-semibold">Step details</h1>
-
-      {loading && (
-        <div className="text-sm text-gray-500">Loading…</div>
-      )}
-
-      {!loading && (
-        <div className="space-y-3">
-          {substeps.map((substep) => (
-            <button
-              key={substep.id}
-              type="button"
-              onClick={() => toggleSubstep(substep)}
-              className={`
-                w-full text-left rounded-xl border p-4
-                ${substep.is_complete
-                  ? "bg-green-50 border-green-200"
-                  : "bg-white border-gray-200"}
-              `}
-            >
-              <div className="font-medium">
-                {substep.label}
-              </div>
-
-              {substep.description && (
-                <div className="text-sm text-gray-500 mt-1">
-                  {substep.description}
-                </div>
-              )}
-            </button>
-          ))}
+    <div
+      className="relative left-1/2 right-1/2 -ml-[50vw] -mr-[50vw] w-screen min-h-screen -mt-2"
+      style={{ backgroundColor: "var(--color-surface-page, #F7F3EB)" }}
+    >
+      <div className="p-6 space-y-4 pb-32">
+        <div
+          className="space-y-3"
+          style={{ color: "var(--color-primary, #004DEA)" }}
+        >
+          <PageHeader title="Step details" backHref={`/opening/${openingId}`} />
         </div>
-      )}
+
+        {loading && (
+          <div className="text-sm text-gray-500">Loading…</div>
+        )}
+
+        {!loading && (
+          <div className="space-y-3">
+            {substeps.map((substep) => (
+              <ChecklistStepCard
+                key={substep.id}
+                title={substep.label}
+                subtitle={substep.description || undefined}
+                status={substep.is_complete ? "complete" : "pending"}
+                showArrow={false}
+                showSubtitle={true}
+                onClick={() => toggleSubstep(substep)}
+              />
+            ))}
+          </div>
+        )}
+      </div>
     </div>
   );
 }
