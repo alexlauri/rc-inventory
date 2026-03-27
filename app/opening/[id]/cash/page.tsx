@@ -21,7 +21,7 @@ type DenominationRow = {
   unit_value: number;
   quantity: number | null;
   amount: number;
-  sort_order: number;
+  sort_order?: number;
 };
 
 type CashResponse = {
