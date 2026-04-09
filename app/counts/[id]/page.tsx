@@ -52,7 +52,7 @@ export default function CountDetailPage() {
       throw new Error(json.error || "Failed to load count");
     }
 
-    const nextLines = json.lines ?? [];
+    const nextLines: CountLine[] = json.lines ?? [];
 
     const changedIds = nextLines
       .filter((nextLine) => {
