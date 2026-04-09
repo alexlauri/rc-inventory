@@ -18,6 +18,8 @@ export async function PATCH(
       .update({
         trailer_qty,
         storage_qty,
+        is_saved: true,
+        updated_at: new Date().toISOString(),
       })
       .eq("id", lineId)
       .eq("inventory_count_id", id)

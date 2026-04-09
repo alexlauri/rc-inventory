@@ -33,14 +33,12 @@ export default function FeaturedToolTile({
       disabled={disabled}
       className={
         isReport
-          ? "relative left-1/2 right-1/2 -ml-[50vw] -mr-[50vw] w-screen border-0 bg-primary p-5 pt-2 pb-4 text-left shadow-none disabled:opacity-100"
-          : "relative left-1/2 right-1/2 -ml-[50vw] -mr-[50vw] w-screen border-0 bg-primary px-5 py-4 text-left shadow-none disabled:opacity-100"
+          ? "relative left-1/2 right-1/2 -ml-[50vw] -mr-[50vw] w-screen border-0 bg-transparent p-10 pt-4 pb-4 text-left shadow-none disabled:opacity-100"
+          : "relative left-1/2 right-1/2 -ml-[50vw] -mr-[50vw] w-screen border-0 bg-transparent px-5 py-4 text-left shadow-none disabled:opacity-100"
       }
     >
       {isReport ? (
         <div className="text-white">
-          <div className="mt-2 mb-8 h-[2px] w-full bg-white/90" />
-
           <div className="flex items-center justify-between gap-8">
             <div className="flex min-w-0 flex-1 items-center gap-4">
               <div className="flex h-8 w-6 shrink-0 items-center justify-center">

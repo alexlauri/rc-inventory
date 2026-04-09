@@ -41,6 +41,8 @@ export default function OpeningCashPage() {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const lastLocalEditAtRef = useRef(0);
+  const isHydratingRef = useRef(false);
 
   useEffect(() => {
     void loadCashCount();
@@ -53,6 +55,67 @@ export default function OpeningCashPage() {
       }
     };
   }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function refreshCashCountInBackground() {
+      if (cancelled || loading || initializing || submitting) {
+        return;
+      }
+
+      if (Date.now() - lastLocalEditAtRef.current < 1200) {
+        return;
+      }
+
+      try {
+        const res = await fetch(`/api/opening/${openingId}/cash`, {
+          cache: "no-store",
+        });
+        const text = await res.text();
+        let json: CashResponse = { cashCount: null, denominations: [] };
+
+        try {
+          json = text ? JSON.parse(text) : { cashCount: null, denominations: [] };
+        } catch {
+          json = { cashCount: null, denominations: [] };
+        }
+
+        if (!res.ok || !json.cashCount) {
+          return;
+        }
+
+        if (cancelled) {
+          return;
+        }
+
+        isHydratingRef.current = true;
+        setCashCount(json.cashCount);
+        setDenominations(json.denominations ?? []);
+        isHydratingRef.current = false;
+      } catch {
+        // Ignore background refresh failures to avoid disrupting active counting.
+      }
+    }
+
+    const interval = window.setInterval(() => {
+      void refreshCashCountInBackground();
+    }, 1500);
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === "visible") {
+        void refreshCashCountInBackground();
+      }
+    };
+
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(interval);
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+    };
+  }, [openingId, loading, initializing, submitting]);
 
   async function loadCashCount() {
     try {
@@ -78,8 +141,10 @@ export default function OpeningCashPage() {
         return;
       }
 
+      isHydratingRef.current = true;
       setCashCount(json.cashCount);
       setDenominations(json.denominations ?? []);
+      isHydratingRef.current = false;
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load cash count");
     } finally {
@@ -184,6 +249,9 @@ export default function OpeningCashPage() {
 
   function updateDenomination(row: DenominationRow, nextValue: number | null) {
     setError(null);
+    if (!isHydratingRef.current) {
+      lastLocalEditAtRef.current = Date.now();
+    }
     const isCoins = row.denomination === "coins";
     const quantity = isCoins ? null : Math.max(0, nextValue ?? 0);
     const amount = isCoins
@@ -272,8 +340,16 @@ export default function OpeningCashPage() {
 
 
   return (
-    <main className="mx-auto max-w-md p-4 space-y-6 pb-28">
-      <PageHeader title="Count Cash" backHref={`/opening/${openingId}`} />
+    <main
+      className="min-h-screen w-full space-y-6 px-6 pb-28 pt-4"
+      style={{ backgroundColor: "var(--color-surface-page, #F7F3EB)" }}
+    >
+      <PageHeader
+        title="Count Cash"
+        backHref={`/opening/${openingId}`}
+        className="text-[var(--color-primary,#004DEA)]"
+        titleClassName="text-[var(--color-primary,#004DEA)]"
+      />
 
       {error && (
         <div className="rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-700">

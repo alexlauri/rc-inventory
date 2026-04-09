@@ -7,8 +7,23 @@ export async function POST() {
   try {
     const supabase = createClient();
 
-    const today = new Date().toISOString().split("T")[0];
     const now = new Date();
+    const nyDateParts = new Intl.DateTimeFormat("en-CA", {
+      timeZone: "America/New_York",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+    }).formatToParts(now);
+
+    const year = nyDateParts.find((part) => part.type === "year")?.value;
+    const month = nyDateParts.find((part) => part.type === "month")?.value;
+    const dayOfMonth = nyDateParts.find((part) => part.type === "day")?.value;
+
+    if (!year || !month || !dayOfMonth) {
+      throw new Error("Failed to determine New York run date");
+    }
+
+    const today = `${year}-${month}-${dayOfMonth}`;
     const day = now.getDay(); // 4 = Thursday
 
     // use opening_first_day on Thursdays, otherwise standard

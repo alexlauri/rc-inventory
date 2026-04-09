@@ -44,7 +44,7 @@ export default function ChecklistToolsHeader({
 }: ChecklistToolsHeaderProps) {
   return (
     <div
-      className="relative left-1/2 right-1/2 -ml-[50vw] -mr-[50vw] w-screen px-6 space-y-0 pt-4 pb-4 -mt-4"
+      className="relative left-1/2 right-1/2 -ml-[50vw] -mr-[50vw] w-screen px-6 space-y-0 pt-4 pb-4 -mt-4 rounded-b-[44px]"
       style={{ backgroundColor: "var(--color-primary, #004DEA)" }}
     >
       <div className="text-white">
@@ -74,14 +74,21 @@ export default function ChecklistToolsHeader({
           )}
 
           {showReport && onSendReport && (
-            <FeaturedToolTile
-              variant="report"
-              title="Send Report"
-              value={reportLabel}
-              status={reportStatus}
-              onClick={onSendReport}
-              disabled={reportDisabled}
-            />
+            <div
+              className="mt-3 mb-3 -ml-1 -mr-1 rounded-[56px]"
+              style={{
+                backgroundColor: "rgba(255,255,255,0.1)",
+              }}
+            >
+              <FeaturedToolTile
+                variant="report"
+                title="Send Report"
+                value={reportLabel}
+                status={reportStatus}
+                onClick={onSendReport}
+                disabled={reportDisabled}
+              />
+            </div>
           )}
         </div>
       )}

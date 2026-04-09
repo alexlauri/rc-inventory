@@ -1,6 +1,6 @@
-
-
 import { Label, Metric, Subtle } from "@/app/components/Type";
+import QuantityPicker from "@/app/components/QuantityPicker";
+import TextInput from "@/app/components/TextInput";
 
 type DenominationRow = {
   id: string;
@@ -23,71 +23,52 @@ export default function CashCountForm({
 }: CashCountFormProps) {
   return (
     <>
-      <div className="rounded-xl border bg-white p-4">
-        <Label>Actual Total</Label>
-        <div className="mt-1">
-          <Metric className="text-3xl">${actualTotal.toFixed(2)}</Metric>
-        </div>
+      <div className="pb-4 flex justify-center">
+        <Metric className="text-center text-[var(--color-primary,#004DEA)]">
+          ${actualTotal.toFixed(2)}
+        </Metric>
       </div>
 
-      <div className="space-y-3">
+      <div className="space-y-0">
         {denominations.map((row) => {
           const isCoins = row.denomination === "coins";
           const quantityValue = Number(row.quantity ?? 0);
           const amountValue = Number(row.amount ?? 0);
+          const denominationLabel = isCoins
+            ? "Coins"
+            : `$${Number(row.unit_value).toFixed(0)}`;
 
           return (
-            <div key={row.id} className="rounded-xl border bg-white p-4">
-              <div className="flex items-center justify-between gap-4">
-                <div>
-                  <Label>{row.denomination}</Label>
-                  <Subtle>
-                    {isCoins
-                      ? "Enter dollar value"
-                      : `${Number(row.unit_value).toFixed(2)} each`}
-                  </Subtle>
+            <div
+              key={row.id}
+              className="border-t-[2px] border-[var(--color-primary,#004DEA)] py-4"
+            >
+              <div className="relative min-h-[48px]">
+                <div className="absolute left-0 top-1/2 -translate-y-1/2 text-[17px] font-[700] leading-none text-[var(--color-primary,#004DEA)] [font-family:var(--font-cabinet)]">
+                  {denominationLabel}
                 </div>
 
                 {isCoins ? (
-                  <input
-                    type="number"
-                    inputMode="decimal"
-                    step="0.01"
-                    min="0"
-                    value={amountValue}
-                    onChange={(event) => {
-                      const next = Number(event.target.value || 0);
-                      void onUpdateDenomination(row, next);
-                    }}
-                    className="h-12 w-28 rounded-xl border px-3 text-right"
-                  />
-                ) : (
-                  <div className="flex items-center gap-2">
-                    <button
-                      type="button"
-                      onClick={() => void onUpdateDenomination(row, quantityValue - 1)}
-                      className="h-12 w-12 rounded-xl border text-xl leading-none"
-                    >
-                      −
-                    </button>
-                    <input
-                      type="number"
-                      inputMode="numeric"
-                      min="0"
-                      value={quantityValue}
-                      onChange={(event) => {
-                        const next = Number(event.target.value || 0);
+                  <div className="flex justify-center">
+                    <TextInput
+                      value={String(amountValue)}
+                      inputMode="decimal"
+                      onChange={(value) => {
+                        const next = parseFloat(value || "0");
                         void onUpdateDenomination(row, next);
                       }}
-                      className="h-12 w-20 rounded-xl border px-2 text-center"
                     />
-                    <button
-                      type="button"
-                      onClick={() => void onUpdateDenomination(row, quantityValue + 1)}
-                      className="h-12 w-12 rounded-xl border text-xl leading-none"
-                    >
-                      +
-                    </button>
+                  </div>
+                ) : (
+                  <div className="flex justify-center">
+                    <div className="w-[200px] max-w-full">
+                      <QuantityPicker
+                        value={quantityValue}
+                        onChange={(next) => {
+                          void onUpdateDenomination(row, next);
+                        }}
+                      />
+                    </div>
                   </div>
                 )}
               </div>

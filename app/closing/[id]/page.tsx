@@ -27,6 +27,7 @@ type ClosingRun = {
   report_copied?: boolean | null;
   report_copied_by_name?: string | null;
   submitted_by_name?: string | null;
+  inventory_count_id?: string | null;
 };
 
 export default function ClosingRunPage() {
@@ -45,6 +46,171 @@ export default function ClosingRunPage() {
   const [reportCopied, setReportCopied] = useState(false);
   const [copyingReport, setCopyingReport] = useState(false);
   const [reportCopiedJustNow, setReportCopiedJustNow] = useState(false);
+  const [inventoryTotalCount, setInventoryTotalCount] = useState<number>(0);
+  const [inventorySavedCount, setInventorySavedCount] = useState<number>(0);
+  // inventoryCountIdRef no longer needed
+  useEffect(() => {
+
+    async function loadViaDedicatedEndpoint() {
+      const res = await fetch(`/api/closing/${id}/inventory-progress?t=${Date.now()}`, {
+        cache: "no-store",
+      });
+      const text = await res.text();
+
+      let json: {
+        error?: string;
+        inventoryTotalCount?: number;
+        inventorySavedCount?: number;
+      } = {};
+
+      try {
+        json = text ? JSON.parse(text) : {};
+      } catch {
+        json = {};
+      }
+
+      if (!res.ok) {
+        throw new Error(json.error || "Failed to load inventory progress");
+      }
+
+      const total = json.inventoryTotalCount ?? 0;
+      const saved = json.inventorySavedCount ?? 0;
+
+      if (total === 0 && saved === 0) {
+        throw new Error("Inventory progress endpoint returned 0/0");
+      }
+
+      setInventoryTotalCount(total);
+      setInventorySavedCount(saved);
+    }
+
+    async function loadViaFallbackApis() {
+      const itemsRes = await fetch(`/api/items?t=${Date.now()}`, {
+        cache: "no-store",
+      });
+      const itemsText = await itemsRes.text();
+
+      let itemsJson: {
+        error?: string;
+        items?: Array<{ id: string }>;
+      } = {};
+
+      try {
+        itemsJson = itemsText ? JSON.parse(itemsText) : {};
+      } catch {
+        itemsJson = {};
+      }
+
+      if (!itemsRes.ok) {
+        throw new Error(itemsJson.error || "Failed to load inventory items");
+      }
+
+      const items = itemsJson.items ?? [];
+      setInventoryTotalCount(items.length);
+
+      const countRes = await fetch(`/api/counts?closing_run_id=${id}&t=${Date.now()}`, {
+        cache: "no-store",
+      });
+      const countText = await countRes.text();
+
+      let countJson: {
+        error?: string;
+        count?: { id?: string | null } | null;
+        countId?: string | null;
+        counts?: Array<{ id?: string | null }>;
+      } = {};
+
+      try {
+        countJson = countText ? JSON.parse(countText) : {};
+      } catch {
+        countJson = {};
+      }
+
+      const countId =
+        countJson.count?.id ?? countJson.countId ?? countJson.counts?.[0]?.id ?? null;
+
+      if (!countId) {
+        setInventorySavedCount(0);
+        return;
+      }
+
+      const linesRes = await fetch(`/api/counts/${countId}?t=${Date.now()}`, {
+        cache: "no-store",
+      });
+      const linesText = await linesRes.text();
+
+      let linesJson: {
+        error?: string;
+        savedCount?: number;
+        totalCount?: number;
+        lines?: Array<{
+          id: string;
+          is_saved?: boolean | null;
+          isSaved?: boolean | null;
+          created_at?: string | null;
+          createdAt?: string | null;
+          updated_at?: string | null;
+          updatedAt?: string | null;
+        }>;
+      } = {};
+
+      try {
+        linesJson = linesText ? JSON.parse(linesText) : {};
+      } catch {
+        linesJson = {};
+      }
+
+      if (!linesRes.ok) {
+        throw new Error(linesJson.error || "Failed to load inventory lines");
+      }
+
+      if (typeof linesJson.totalCount === "number") {
+        setInventoryTotalCount(linesJson.totalCount);
+      }
+
+      if (typeof linesJson.savedCount === "number") {
+        setInventorySavedCount(linesJson.savedCount);
+        return;
+      }
+
+      const lines = linesJson.lines ?? [];
+      setInventorySavedCount(
+        lines.filter((line) => {
+          const explicitSaved = Boolean(line.is_saved ?? line.isSaved);
+          const createdAt = line.created_at ?? line.createdAt ?? null;
+          const updatedAt = line.updated_at ?? line.updatedAt ?? null;
+          const timestampSaved = Boolean(createdAt && updatedAt && createdAt !== updatedAt);
+          return explicitSaved || timestampSaved;
+        }).length
+      );
+    }
+
+    async function loadInventoryProgress() {
+      if (!id) return;
+
+      try {
+        await loadViaDedicatedEndpoint();
+      } catch {
+        try {
+          await loadViaFallbackApis();
+        } catch {
+          setInventoryTotalCount(0);
+          setInventorySavedCount(0);
+        }
+      }
+    }
+
+    if (id) {
+      void loadInventoryProgress();
+    }
+
+    const interval = window.setInterval(() => {
+      void loadInventoryProgress();
+    }, 4000);
+
+    return () => window.clearInterval(interval);
+  }, [id]);
+
   const sendReportRef = useRef<HTMLDivElement | null>(null);
   const stepRefs = useRef<Record<string, React.RefObject<HTMLDivElement | null>>>({});
 
@@ -254,29 +420,27 @@ export default function ClosingRunPage() {
 
   const isLastDayClosing = closingRun?.checklist_key === "last_day_closing";
   const combinedReportMessage = useMemo(() => {
-    if (isLastDayClosing) {
-      if (!inventoryReportMessage || cashCountTotal == null) {
-        return "";
-      }
+    const parts: string[] = [];
 
-      return `${reportDateLabel}\n\n${inventoryReportMessage}\n\ncash count: $${cashCountTotal.toFixed(2)}`;
+    if (inventoryReportMessage) {
+      parts.push(`${reportDateLabel}\n\n${inventoryReportMessage}`);
     }
 
     if (cashCountTotal != null) {
-      return `${reportDateLabel} - cash count: $${cashCountTotal.toFixed(2)}`;
+      const cashMessage = inventoryReportMessage
+        ? `cash count: $${cashCountTotal.toFixed(2)}`
+        : `${reportDateLabel} - cash count: $${cashCountTotal.toFixed(2)}`;
+      parts.push(cashMessage);
     }
 
-    return "";
-  }, [isLastDayClosing, inventoryReportMessage, cashCountTotal, reportDateLabel]);
+    return parts.join("\n\n");
+  }, [inventoryReportMessage, cashCountTotal, reportDateLabel]);
 
 
   const canSendReport = useMemo(() => {
     if (!cashStepComplete) return false;
-    if (isLastDayClosing) {
-      return inventoryStepComplete && Boolean(combinedReportMessage);
-    }
-    return cashCountTotal != null && Boolean(combinedReportMessage);
-  }, [cashStepComplete, isLastDayClosing, inventoryStepComplete, cashCountTotal, combinedReportMessage]);
+    return Boolean(combinedReportMessage);
+  }, [cashStepComplete, combinedReportMessage]);
 
   const allStepsComplete = useMemo(() => {
     const baseStepsComplete = steps.length > 0 && steps.every((step) => step.is_complete);
@@ -497,11 +661,7 @@ export default function ClosingRunPage() {
   }
 
   function getInventoryProgressLabel() {
-    if (!featuredSteps.inventoryStep) {
-      return "0/0";
-    }
-
-    return inventoryStepComplete ? "Complete" : "0/34";
+    return `${inventorySavedCount}/${inventoryTotalCount}`;
   }
 
   function getCashProgressLabel() {

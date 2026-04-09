@@ -1,8 +1,11 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
-import { useParams, useSearchParams } from "next/navigation";
-import Link from "next/link";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { useParams, useRouter, useSearchParams } from "next/navigation";
+import PageHeader from "@/app/components/PageHeader";
+import StickySubmitButton from "@/app/components/StickySubmitButton";
+import InventoryItemCard from "@/app/components/InventoryItemCard";
+import { H2, Subtle } from "@/app/components/Type";
 
 type CountLine = {
   id: string;
@@ -14,9 +17,14 @@ type CountLine = {
   item_sort_order: number;
   trailer_qty: number;
   storage_qty: number;
+  updated_at?: string | null;
+  created_at?: string | null;
+  is_saved?: boolean | null;
+  isSaved?: boolean | null;
 };
 
 export default function CountDetailPage() {
+  const router = useRouter();
   const params = useParams<{ id: string }>();
   const searchParams = useSearchParams();
   const closingRunId = searchParams.get("closing_run_id");
@@ -25,6 +33,121 @@ export default function CountDetailPage() {
   const [lines, setLines] = useState<CountLine[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [collapsedLineIds, setCollapsedLineIds] = useState<Record<string, boolean>>({});
+  const lastLocalEditAtRef = useRef(0);
+  const hasHydratedLocalProgressRef = useRef(false);
+  const lastFetchedServerLinesRef = useRef<Record<string, string | null>>({});
+  const storageKey = countId ? `weekly-count-progress:${countId}` : null;
+  const collapsedStorageKey = countId ? `weekly-count-collapsed:${countId}` : null;
+
+  async function fetchLinesInBackground() {
+    if (!countId) return;
+
+    const res = await fetch(`/api/counts/${countId}?t=${Date.now()}`, {
+      cache: "no-store",
+    });
+    const json = await res.json();
+
+    if (!res.ok) {
+      throw new Error(json.error || "Failed to load count");
+    }
+
+    const nextLines = json.lines ?? [];
+
+    const changedIds = nextLines
+      .filter((nextLine) => {
+        const previousUpdatedAt = lastFetchedServerLinesRef.current[nextLine.id];
+        return (
+          previousUpdatedAt &&
+          nextLine.updated_at &&
+          previousUpdatedAt !== nextLine.updated_at
+        );
+      })
+      .map((line) => line.id);
+
+    if (changedIds.length > 0) {
+      setCollapsedLineIds((current) => {
+        const next = { ...current };
+        changedIds.forEach((id) => {
+          next[id] = true;
+        });
+
+        if (collapsedStorageKey) {
+          try {
+            localStorage.setItem(collapsedStorageKey, JSON.stringify(next));
+          } catch {}
+        }
+
+        return next;
+      });
+    }
+
+    lastFetchedServerLinesRef.current = Object.fromEntries(
+      nextLines.map((line) => [line.id, line.updated_at ?? null])
+    );
+
+    let hydratedLines = nextLines;
+
+    const serverCollapsedMap = Object.fromEntries(
+      nextLines
+        .filter((line) => {
+          const explicitSaved = Boolean(line.is_saved ?? line.isSaved);
+          const createdAt = line.created_at ?? null;
+          const updatedAt = line.updated_at ?? null;
+          const timestampSaved = Boolean(createdAt && updatedAt && createdAt !== updatedAt);
+          return explicitSaved || timestampSaved;
+        })
+        .map((line) => [line.id, true])
+    ) as Record<string, boolean>;
+
+    // hydrate local draft only once on initial load, not on every live-sync poll
+    if (storageKey && !hasHydratedLocalProgressRef.current) {
+      try {
+        const raw = localStorage.getItem(storageKey);
+        if (raw) {
+          const saved = JSON.parse(raw) as Record<
+            string,
+            { trailer_qty: number; storage_qty: number }
+          >;
+
+          hydratedLines = nextLines.map((line) => {
+            const local = saved[line.id];
+            if (!local) return line;
+            return {
+              ...line,
+              trailer_qty: local.trailer_qty,
+              storage_qty: local.storage_qty,
+            };
+          });
+        }
+      } catch {}
+
+      hasHydratedLocalProgressRef.current = true;
+    }
+
+    if (collapsedStorageKey) {
+      try {
+        const rawCollapsed = localStorage.getItem(collapsedStorageKey);
+        if (rawCollapsed) {
+          const savedCollapsed = JSON.parse(rawCollapsed) as Record<string, boolean>;
+          setCollapsedLineIds({
+            ...serverCollapsedMap,
+            ...savedCollapsed,
+          });
+        } else {
+          setCollapsedLineIds(serverCollapsedMap);
+        }
+      } catch {
+        setCollapsedLineIds(serverCollapsedMap);
+      }
+    } else {
+      setCollapsedLineIds(serverCollapsedMap);
+    }
+
+    setLines(hydratedLines);
+
+    setError(null);
+  }
 
   useEffect(() => {
     async function loadLines() {
@@ -34,14 +157,7 @@ export default function CountDetailPage() {
         setLoading(true);
         setError(null);
 
-        const res = await fetch(`/api/counts/${countId}`);
-        const json = await res.json();
-
-        if (!res.ok) {
-          throw new Error(json.error || "Failed to load count");
-        }
-
-        setLines(json.lines ?? []);
+        await fetchLinesInBackground();
       } catch (err) {
         setError(err instanceof Error ? err.message : "Something went wrong");
       } finally {
@@ -51,6 +167,46 @@ export default function CountDetailPage() {
 
     loadLines();
   }, [countId]);
+
+  useEffect(() => {
+    if (!countId) return;
+
+    let cancelled = false;
+
+    async function refreshInBackground() {
+      if (cancelled || loading) {
+        return;
+      }
+
+      if (Date.now() - lastLocalEditAtRef.current < 1200) {
+        return;
+      }
+
+      try {
+        await fetchLinesInBackground();
+      } catch {
+        // Ignore background refresh failures to avoid disrupting active counting.
+      }
+    }
+
+    const interval = window.setInterval(() => {
+      void refreshInBackground();
+    }, 1500);
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === "visible") {
+        void refreshInBackground();
+      }
+    };
+
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(interval);
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+    };
+  }, [countId, loading]);
 
   const groupedLines = useMemo(() => {
     const grouped: Record<string, CountLine[]> = {};
@@ -76,6 +232,7 @@ export default function CountDetailPage() {
 
     try {
       setError(null);
+      lastLocalEditAtRef.current = Date.now();
 
       const res = await fetch(`/api/counts/${countId}/lines/${lineId}`, {
         method: "PATCH",
@@ -99,6 +256,37 @@ export default function CountDetailPage() {
           line.id === lineId ? { ...line, trailer_qty, storage_qty } : line
         )
       );
+
+      // persist local progress
+      if (storageKey) {
+        try {
+          const raw = localStorage.getItem(storageKey);
+          const current = raw ? JSON.parse(raw) : {};
+          localStorage.setItem(
+            storageKey,
+            JSON.stringify({
+              ...current,
+              [lineId]: { trailer_qty, storage_qty },
+            })
+          );
+        } catch {}
+      }
+
+      setCollapsedLineIds((prev) => {
+        const next = {
+          ...prev,
+          [lineId]: true,
+        };
+
+        if (collapsedStorageKey) {
+          try {
+            localStorage.setItem(collapsedStorageKey, JSON.stringify(next));
+          } catch {}
+        }
+
+        return next;
+      });
+      hasHydratedLocalProgressRef.current = true;
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to save line");
     }
@@ -106,19 +294,16 @@ export default function CountDetailPage() {
 
   return (
     <>
-      <main className="mx-auto max-w-md p-6 space-y-6 pb-32">
-      <div className="pt-4">
-        <Link
-          href={closingRunId ? `/closing/${closingRunId}` : "/"}
-          className="text-sm text-gray-600 underline"
-        >
-          ← Back
-        </Link>
-      </div>
-  
-      <div className="space-y-1">
-        <h1 className="text-3xl font-semibold">Weekly Count</h1>
-      </div>
+      <main
+        className="min-h-screen w-full space-y-4 px-6 pb-32 pt-4"
+        style={{ backgroundColor: "var(--color-surface-page, #F7F3EB)" }}
+      >
+        <PageHeader
+          title="Weekly Count"
+          backHref={closingRunId ? `/closing/${closingRunId}` : "/"}
+          className="text-[var(--color-primary,#004DEA)]"
+          titleClassName="text-[var(--color-primary,#004DEA)]"
+        />
 
       {error && (
         <div className="rounded border border-red-300 bg-red-50 p-4 text-sm text-red-700">
@@ -129,16 +314,35 @@ export default function CountDetailPage() {
       {loading ? (
         <p className="text-sm text-gray-600">Loading items...</p>
       ) : (
-        <div className="space-y-6">
+        <div className="space-y-10">
           {Object.entries(groupedLines).map(([category, categoryLines]) => (
-            <section key={category} className="space-y-3">
-              <h2 className="text-lg font-semibold">{category}</h2>
+            <section key={category} className="space-y-6">
+              <H2 className="text-[var(--color-primary,#004DEA)]">
+                {category}
+              </H2>
 
               {categoryLines.map((line) => (
                 <InventoryLineCard
                   key={line.id}
                   line={line}
                   onSave={updateLine}
+                  collapsed={!!collapsedLineIds[line.id]}
+                  onExpand={() => {
+                    setCollapsedLineIds((prev) => {
+                      const next = {
+                        ...prev,
+                        [line.id]: false,
+                      };
+
+                      if (collapsedStorageKey) {
+                        try {
+                          localStorage.setItem(collapsedStorageKey, JSON.stringify(next));
+                        } catch {}
+                      }
+
+                      return next;
+                    });
+                  }}
                 />
               ))}
             </section>
@@ -147,24 +351,31 @@ export default function CountDetailPage() {
       )}
       </main>
 
-      <div className="pointer-events-none fixed inset-x-0 bottom-0 z-40">
-        <div className="mx-auto flex max-w-md justify-center px-4 pb-4">
-          <div className="pointer-events-auto w-full rounded-2xl bg-white/95 p-3 shadow-lg ring-1 ring-black/5 backdrop-blur">
-            <Link
-              href={
-                countId
-                  ? `/counts/${countId}/report${
-                      closingRunId ? `?closing_run_id=${closingRunId}` : ""
-                    }`
-                  : "#"
-              }
-              className="block w-full rounded-xl bg-black px-4 py-3 text-center font-medium text-white shadow-sm transition active:scale-[0.99]"
-            >
-              Continue
-            </Link>
-          </div>
-        </div>
-      </div>
+      <StickySubmitButton
+        label="Continue"
+        disabled={!countId}
+        onClick={() => {
+          if (!countId) return;
+
+          if (storageKey) {
+            try {
+              localStorage.removeItem(storageKey);
+            } catch {}
+          }
+
+          if (collapsedStorageKey) {
+            try {
+              localStorage.removeItem(collapsedStorageKey);
+            } catch {}
+          }
+
+          router.push(
+            `/counts/${countId}/report${
+              closingRunId ? `?closing_run_id=${closingRunId}` : ""
+            }`
+          );
+        }}
+      />
     </>
   );
 }
@@ -172,6 +383,8 @@ export default function CountDetailPage() {
 function InventoryLineCard({
   line,
   onSave,
+  collapsed,
+  onExpand,
 }: {
   line: CountLine;
   onSave: (
@@ -179,123 +392,81 @@ function InventoryLineCard({
     trailer_qty: number,
     storage_qty: number
   ) => Promise<void>;
+  collapsed: boolean;
+  onExpand: () => void;
 }) {
   const [trailer, setTrailer] = useState<number>(line.trailer_qty);
   const [storage, setStorage] = useState<number>(line.storage_qty);
+  const [saving, setSaving] = useState(false);
+  const total = trailer + storage;
 
   useEffect(() => {
     setTrailer(line.trailer_qty);
     setStorage(line.storage_qty);
   }, [line.trailer_qty, line.storage_qty]);
 
-  useEffect(() => {
-    if (trailer === line.trailer_qty && storage === line.storage_qty) {
-      return;
-    }
+  if (collapsed) {
+    return (
+      <button
+        type="button"
+        onClick={onExpand}
+        className="flex w-full items-center justify-between gap-6 py-2 text-left transition active:scale-[0.99]"
+        aria-label={`Edit ${line.item_name}`}
+      >
+        <div className="min-w-0 space-y-1">
+          <H2>{line.item_name}</H2>
+          <Subtle className="text-[var(--color-foreground,#3A3A3A)] uppercase tracking-[0.06em]">
+            {(line.item_unit?.toUpperCase() || "UNIT") + " • PAR " + line.item_par}
+          </Subtle>
+        </div>
 
-    const timeout = window.setTimeout(() => {
-      void onSave(line.id, trailer, storage);
-    }, 800);
+        <div className="shrink-0 rounded-full bg-[rgba(0,134,67,0.15)] px-4 py-2 pr-2">
+          <div className="flex items-center gap-2.5">
+            <div className="text-[17px] font-[700] leading-none text-[#008643] [font-family:var(--font-cabinet)] tabular-nums translate-y-0.25">
+              {total}
+            </div>
 
-    return () => {
-      window.clearTimeout(timeout);
-    };
-  }, [trailer, storage, line.id, line.trailer_qty, line.storage_qty, onSave]);
-
-  const total = trailer + storage;
-  const status =
-    total === 0 ? "critical" : total <= line.item_threshold ? "low" : "ok";
-
-  const statusClasses =
-    status === "critical"
-      ? "border-red-200 bg-red-50 text-red-700"
-      : status === "low"
-      ? "border-yellow-200 bg-yellow-50 text-yellow-700"
-      : "border-green-200 bg-green-50 text-green-700";
-
-  return (
-    <div className="rounded-lg border p-4 space-y-4">
-      <div className="flex items-start justify-between gap-3">
-        <div>
-          <div className="font-medium">{line.item_name}</div>
-          <div className="text-sm text-gray-600">
-            {line.item_unit} · par {line.item_par}
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              viewBox="0 0 24 24"
+              fill="none"
+              className="h-6 w-6"
+              aria-hidden="true"
+            >
+              <circle cx="12" cy="12" r="12" />
+              <path d="M12 2C6.5 2 2 6.5 2 12C2 17.5 6.5 22 12 22C17.5 22 22 17.5 22 12C22 6.5 17.5 2 12 2ZM16.2 10.3L11.4 15.1C11 15.5 10.4 15.5 10 15.1L7.8 12.9C7.4 12.5 7.4 11.9 7.8 11.5C8.2 11.1 8.8 11.1 9.2 11.5L10.7 13L14.8 8.9C15.2 8.5 15.8 8.5 16.2 8.9C16.6 9.3 16.6 9.9 16.2 10.3Z" fill="#008643"/>
+            </svg>
           </div>
         </div>
-
-        <div className={`rounded border px-2 py-1 text-xs font-medium ${statusClasses}`}>
-          {status.toUpperCase()}
-        </div>
-      </div>
-
-      <div className="grid grid-cols-2 gap-3">
-        <CounterField
-          label="Trailer"
-          value={trailer}
-          onChange={setTrailer}
-        />
-        <CounterField
-          label="Storage"
-          value={storage}
-          onChange={setStorage}
-        />
-      </div>
-
-      <div className="flex items-center justify-between gap-3">
-        <div className="text-sm text-gray-600">Total: {total}</div>
-      </div>
-    </div>
-  );
-}
-
-function CounterField({
-  label,
-  value,
-  onChange,
-}: {
-  label: string;
-  value: number;
-  onChange: (next: number) => void;
-}) {
-  function decrement() {
-    onChange(Math.max(0, value - 1));
-  }
-
-  function increment() {
-    onChange(value + 1);
+      </button>
+    );
   }
 
   return (
-    <div>
-      <label className="mb-2 block text-sm font-medium">{label}</label>
-      <div className="flex items-center gap-2">
-        <button
-          type="button"
-          onClick={decrement}
-          className="h-10 w-10 rounded border text-lg"
-        >
-          -
-        </button>
-
-        <input
-          type="number"
-          min={0}
-          value={value}
-          onChange={(e) => {
-            const nextValue = e.target.value === "" ? 0 : Number(e.target.value);
-            onChange(Math.max(0, Number.isFinite(nextValue) ? nextValue : 0));
-          }}
-          className="h-10 w-full rounded border px-3 text-center"
-        />
-
-        <button
-          type="button"
-          onClick={increment}
-          className="h-10 w-10 rounded border text-lg"
-        >
-          +
-        </button>
-      </div>
-    </div>
+    <InventoryItemCard
+      item={{
+        id: line.id,
+        item_name: line.item_name,
+        item_category: line.item_category,
+        item_unit: line.item_unit,
+        item_par: line.item_par,
+        trailer_qty: trailer,
+        storage_qty: storage,
+      }}
+      onTrailerChange={setTrailer}
+      onStorageChange={setStorage}
+      onSave={() => {
+        void (async () => {
+          try {
+            setSaving(true);
+            await onSave(line.id, trailer, storage);
+          } finally {
+            setSaving(false);
+          }
+        })();
+      }}
+      saveLabel="Save"
+      saveDisabled={saving}
+    />
   );
 }

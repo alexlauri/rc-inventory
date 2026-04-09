@@ -193,35 +193,86 @@ export default function CountReportPage() {
   async function persistReportMessage() {
     const reportMessage = buildInventoryReportMessage(reportItems);
 
-    // keep local fallback
+    // keep local fallback under both keys so the closing page can always find it
     if (typeof window !== "undefined") {
-      const storageKeyBase = closingRunId ?? countId;
-      window.localStorage.setItem(
-        `inventory_report_message_${storageKeyBase}`,
-        reportMessage
+      const storageKeys = [closingRunId, countId].filter(
+        (value): value is string => Boolean(value)
       );
-      window.localStorage.setItem(
-        `inventory_report_copied_${storageKeyBase}`,
-        "false"
-      );
+
+      storageKeys.forEach((storageKeyBase) => {
+        window.localStorage.setItem(
+          `inventory_report_message_${storageKeyBase}`,
+          reportMessage
+        );
+        window.localStorage.setItem(
+          `inventory_report_copied_${storageKeyBase}`,
+          "false"
+        );
+      });
     }
 
     // persist to closing run for shared multi-user state
     if (closingRunId) {
+      const res = await fetch(`/api/closing/${closingRunId}`, {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          inventory_report_message: reportMessage,
+        }),
+      });
+
+      const text = await res.text();
+      let json: { error?: string } = {};
+
       try {
-        await fetch(`/api/closing/${closingRunId}`, {
-          method: "PATCH",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            inventory_report_message: reportMessage,
-          }),
-        });
-      } catch (err) {
-        console.error("Failed to persist shared report message", err);
+        json = text ? JSON.parse(text) : {};
+      } catch {
+        json = {};
+      }
+
+      if (!res.ok) {
+        throw new Error(json.error || "Failed to persist shared report message");
       }
     }
+    return reportMessage;
+  }
+
+  async function ensureClosingRunHasReportMessage(expectedMessage: string) {
+    if (!closingRunId) {
+      return;
+    }
+
+    for (let attempt = 0; attempt < 4; attempt += 1) {
+      const res = await fetch(`/api/closing/${closingRunId}?t=${Date.now()}`, {
+        cache: "no-store",
+      });
+      const text = await res.text();
+
+      let json: {
+        error?: string;
+        run?: { inventory_report_message?: string | null } | null;
+      } = {};
+
+      try {
+        json = text ? JSON.parse(text) : {};
+      } catch {
+        json = {};
+      }
+
+      if (!res.ok) {
+        throw new Error(json.error || "Failed to verify saved report");
+      }
+
+      if (json.run?.inventory_report_message === expectedMessage) {
+        return;
+      }
+
+      await new Promise((resolve) => window.setTimeout(resolve, 150));
+    }
+
+    throw new Error("Report saved locally, but closing run did not refresh in time");
   }
 
   async function completeInventoryStep() {
@@ -324,8 +375,9 @@ export default function CountReportPage() {
       }
       const nextStatus = json.count?.status ?? "submitted";
 
-      await persistReportMessage();
       await completeInventoryStep();
+      const reportMessage = await persistReportMessage();
+      await ensureClosingRunHasReportMessage(reportMessage);
 
       setCountStatus(nextStatus);
 
@@ -414,15 +466,23 @@ export default function CountReportPage() {
                 }
 
                 void (async () => {
-                  await persistReportMessage();
-                  await completeInventoryStep();
+                  try {
+                    setSubmitting(true);
+                    await completeInventoryStep();
+                    const reportMessage = await persistReportMessage();
+                    await ensureClosingRunHasReportMessage(reportMessage);
+
+                    if (closingRunId && typeof window !== "undefined") {
+                      window.sessionStorage.setItem(`inventory_report_scroll_${closingRunId}`, "true");
+                    }
+
+                    router.push(closingRunId ? `/closing/${closingRunId}` : "/");
+                  } catch (err) {
+                    setError(err instanceof Error ? err.message : "Failed to save report");
+                  } finally {
+                    setSubmitting(false);
+                  }
                 })();
-
-                if (closingRunId && typeof window !== "undefined") {
-                  window.sessionStorage.setItem(`inventory_report_scroll_${closingRunId}`, "true");
-                }
-
-                router.push(closingRunId ? `/closing/${closingRunId}` : "/");
               }}
               disabled={submitting || loading}
               className="w-full rounded-xl bg-black px-4 py-3 text-white font-medium disabled:opacity-50"
@@ -438,7 +498,7 @@ export default function CountReportPage() {
 
 function ReportCard({ item }: { item: ReportItem }) {
   return (
-    <div className="rounded-lg border p-4 space-y-2 bg-white">
+    <div className="space-y-2 rounded-lg border bg-white p-4">
       <div className="flex items-start justify-between gap-3">
         <div>
           <div className="font-medium">{item.item_name}</div>
@@ -461,6 +521,14 @@ function ReportCard({ item }: { item: ReportItem }) {
       <div className="grid grid-cols-2 gap-3 text-sm text-gray-700">
         <div>Trailer: {item.trailer_qty}</div>
         <div>Storage: {item.storage_qty}</div>
+        <div>Total: {item.total}</div>
+        <div>
+          Order: {item.suggestedOrderQty} {item.item_unit}
+        </div>
+      </div>
+
+      <div className="text-sm text-gray-600">
+        Supplier: {getSupplierLabel(item)}
       </div>
     </div>
   );

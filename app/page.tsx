@@ -23,13 +23,13 @@ type StoredUser = {
 
 function formatRunDate(dateString: string) {
   const [year, month, day] = dateString.split("-").map(Number);
-  const date = new Date(year, month - 1, day);
 
-  return date.toLocaleDateString(undefined, {
+  return new Intl.DateTimeFormat(undefined, {
     year: "numeric",
     month: "short",
     day: "numeric",
-  });
+    timeZone: "UTC",
+  }).format(new Date(Date.UTC(year, month - 1, day)));
 }
 
 function getRunStatusMeta(run: ChecklistRun) {
@@ -81,6 +81,7 @@ export default function HomePage() {
   const [currentUser, setCurrentUser] = useState<StoredUser | null>(null);
   const [userResolved, setUserResolved] = useState(false);
   const [now, setNow] = useState(() => new Date());
+  const [viewportWidth, setViewportWidth] = useState(390);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -103,14 +104,28 @@ export default function HomePage() {
   }, []);
 
   useEffect(() => {
+    const updateViewportWidth = () => {
+      setViewportWidth(window.innerWidth);
+    };
+
+    updateViewportWidth();
+
     const interval = window.setInterval(() => {
       setNow(new Date());
     }, 1000);
 
-    return () => window.clearInterval(interval);
+    window.addEventListener("resize", updateViewportWidth);
+
+    return () => {
+      window.clearInterval(interval);
+      window.removeEventListener("resize", updateViewportWidth);
+    };
   }, []);
 
   const isAdmin = useMemo(() => isAdminUser(currentUser), [currentUser]);
+  const staffBlockBaseWidth = 430;
+  const staffBlockBaseHeight = 390;
+  const staffBlockScale = (viewportWidth * 1.0) / staffBlockBaseWidth;
 
   async function loadRuns(options?: { silent?: boolean }) {
     const silent = options?.silent ?? false;
@@ -279,7 +294,7 @@ export default function HomePage() {
   if (!isAdmin) {
     return (
       <main
-        className="flex min-h-screen w-full flex-col justify-between px-6 pb-10 pt-8"
+        className="flex min-h-screen w-full flex-col overflow-x-hidden px-6 pb-36 pt-8"
         style={{ backgroundColor: "var(--color-surface-page, #F7F3EB)" }}
       >
         <div className="space-y-10">
@@ -319,87 +334,98 @@ export default function HomePage() {
           </div>
 
           <div
-            className="space-y-3 [font-family:var(--font-cabinet)] pt-6"
-            style={{ color: "var(--color-primary, #004DEA)" }}
+            className="relative w-[90vw] max-w-full"
+            style={{
+              height: `${staffBlockBaseHeight * staffBlockScale}px`,
+            }}
           >
-            <div className="text-[116px] font-[750] uppercase leading-[0.9] tracking-[0em]">
-              JOPLIN
-            </div>
+            <div
+              className="absolute left-0 top-0 w-[430px] space-y-2 [font-family:var(--font-cabinet)] origin-top-left -mt-6"
+              style={{
+                color: "var(--color-primary, #004DEA)",
+                transform: `scale(${staffBlockScale})`,
+              }}
+            >
+              <div className="text-[88px] font-[750] uppercase leading-[0.9] tracking-[0em]">
+                JOPLIN
+              </div>
 
-            <div className="flex items-baseline gap-3 text-[116px] font-[750] uppercase leading-[0.9] tracking-[0em]">
-              OPS
-              <svg
-                xmlns="http://www.w3.org/2000/svg"
-                viewBox="0 0 63 83"
-                fill="none"
-                className="h-[86px] w-[86px] shrink-0 translate-y-3"
-                aria-hidden="true"
-              >
-                <path d="M61.4571 19.4221C60.244 18.8265 57.0626 17.4293 53.3776 14.4286C47.7357 9.83603 48.0218 1.06314 42.6088 0.158359C34.6666 -1.17017 30.5124 6.29709 30.5124 6.29709C29.1849 2.74671 25.8433 1.63578 24.2182 1.64723C16.4706 1.7045 12.717 10.2598 11.5268 13.6727C10.8974 15.4594 10.0848 17.1888 9.05488 18.7693C3.57319 27.1757 -2.85836 26.6145 1.36449 30.0389C5.38135 33.2915 5.91921 36.9106 5.87344 38.8118C5.82766 40.7015 5.9421 42.5912 6.26254 44.4466C8.91755 59.885 18.2902 62.8742 25.9348 62.7253C30.3751 67.7646 36.0857 72.0022 42.1053 72.8039C45.9848 73.3192 49.2578 73.01 51.9471 72.0823C51.6725 73.0215 51.4207 74.0179 51.2261 74.9799C51.0316 75.9419 50.9172 76.9154 51.1117 77.9004C51.455 79.9046 53.0801 81.5882 55.0484 81.8974C55.9296 82.0463 56.8337 81.9432 57.5776 81.5309C57.692 81.4622 57.7836 81.3591 57.8293 81.2217C57.8866 81.0155 57.8179 80.8094 57.6577 80.672C54.9455 81.1072 52.382 78.7135 54.2588 73.9606C55.6435 70.456 56.6621 67.6157 50.6654 69.4138C49.6469 69.7001 48.5711 69.8834 47.4153 69.975C45.7216 70.1124 44.0164 70.0094 42.0824 69.8376C33.3506 69.0817 24.7675 58.1671 24.4013 51.6619C24.1152 46.5653 26.7817 45.7407 29.4481 45.9927C33.7511 46.3936 34.5064 58.5107 34.9413 61.3853C35.6623 66.1841 37.7794 65.7374 38.5462 64.0882C39.908 61.1334 40.2971 54.5022 44.2682 52.9102C46.8431 51.8795 49.4294 54.7312 51.1346 55.5787C56.7994 58.4305 49.0289 46.7142 51.7411 47.0006C55.1171 47.3556 57.4403 50.0814 58.6075 53.3454C60.1525 56.9645 59.4887 61.6717 59.3056 66.2643C63.6086 59.1635 61.4457 48.1688 53.4806 41.7551C52.0272 40.587 50.7569 39.5677 49.6698 38.64C52.2561 31.8255 60.244 24.2323 62.0522 21.4607C62.5214 20.7391 62.2467 19.7886 61.4686 19.4106L61.4571 19.4221ZM47.5869 36.7388C47.6899 36.8533 47.8044 36.9564 47.9188 37.0709C47.8044 36.9564 47.6899 36.8419 47.5869 36.7388ZM46.6714 35.6851C46.7401 35.7768 46.8202 35.8684 46.9003 35.96C46.8202 35.8684 46.7515 35.7768 46.6714 35.6851ZM46.9346 36.0173C47.0262 36.1203 47.1177 36.2349 47.2093 36.3379C47.1063 36.2349 47.0147 36.1203 46.9346 36.0173ZM49.2234 38.2735C49.3608 38.3995 49.5095 38.5254 49.6583 38.6514C49.5095 38.5254 49.3722 38.3995 49.2234 38.2735ZM48.3537 37.4947C48.4796 37.6092 48.6055 37.7237 48.7313 37.8497C48.6055 37.7352 48.4681 37.6092 48.3537 37.4947ZM46.6371 35.6508C44.0965 32.3523 45.5041 29.6838 52.6109 23.9345C52.6109 23.9345 49.2349 23.442 47.0605 21.3805C47.0605 21.3805 47.0376 24.1063 41.2927 25.5264C38.4317 26.2251 35.2159 26.8779 32.0231 27.1986C30.6383 38.8003 39.702 44.2977 39.702 44.2977C30.6841 39.0637 28.4182 32.2264 28.1092 27.3933C23.9665 27.3818 20.1785 26.5687 17.6722 24.2666C17.6722 24.2666 14.3992 36.7502 17.4434 48.2146C17.7638 49.4171 18.2788 50.7915 18.9654 52.246C15.7039 50.9632 13.2777 48.0542 12.6826 44.5038L11.893 39.854C11.0233 36.0058 9.18076 32.4325 6.52575 29.512L4.72904 27.5307C4.72904 27.5307 10.7143 22.3196 14.7769 16.8566C18.851 11.3822 23.3828 18.1623 27.7315 17.498C32.0803 16.8337 35.0443 13.1344 39.5189 14.0278C43.9935 14.9325 49.933 24.7362 55.0942 22.4342C55.0942 22.4342 50.1618 28.6531 46.6485 35.6508H46.6371Z" fill="currentColor" />
-                <path d="M56.2843 76.377C55.9524 76.6289 55.9066 77.1099 56.1927 77.4192C56.4559 77.7055 56.9023 77.7169 57.1884 77.4535C59.6717 75.1057 58.6418 69.8488 57.3257 67.1001C57.1998 66.8482 56.8221 67.02 56.9137 67.2719C57.2112 68.0507 57.4058 68.8753 57.5431 69.6999C57.7949 71.3033 57.8521 73.0213 57.4058 74.5674C57.1884 75.3118 56.8107 75.9761 56.2957 76.3655L56.2843 76.377Z" fill="currentColor" />
-                <path d="M44.9038 20.0411C44.7664 19.9151 44.6291 19.8006 44.4918 19.6746C42.6035 18.0025 40.6466 16.2731 39.2275 15.9983C38.7011 15.8952 38.1976 15.8608 37.6711 15.9066C36.172 16.0326 34.7415 16.7541 33.2309 17.51C31.6172 18.3232 29.9579 19.1707 27.9437 19.4799C27.8178 19.5028 27.6919 19.5143 27.5546 19.5257C25.5977 19.6861 23.8239 18.8157 22.0958 17.9681C20.6767 17.281 19.3492 16.6282 18.2277 16.7198C17.7127 16.7656 16.9002 16.9717 15.9275 18.2774C15.0348 19.4685 14.0735 20.6481 13.0894 21.759C13.6501 22.5836 15.1722 23.1219 16.1678 22.9501C17.6097 22.6982 17.9988 21.8736 17.9988 21.8736C17.9988 21.8736 19.8528 26.8556 25.4031 24.9887C28.493 23.9465 28.9393 22.0797 28.9393 22.0797C28.9393 22.0797 30.5987 25.4354 34.6499 24.7711C38.7011 24.1183 40.2346 20.8772 40.2346 20.8772C40.2346 20.8772 40.555 24.1641 43.9081 23.7633C44.6177 23.6717 45.167 23.2479 45.4645 22.6524C45.8994 21.7705 45.6476 20.6939 44.9152 20.0411H44.9038Z" fill="currentColor" />
-              </svg>
-            </div>
+              <div className="flex items-baseline gap-2 text-[88px] font-[750] uppercase leading-[0.9] tracking-[0em]">
+                OPS
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  viewBox="0 0 63 72"
+                  fill="none"
+                  className="h-[66px] w-[66px] shrink-0 translate-y-1.5"
+                  aria-hidden="true"
+                >
+                  <path d="M61.4571 19.4221C60.244 18.8265 57.0626 17.4293 53.3776 14.4286C47.7357 9.83603 48.0218 1.06314 42.6088 0.158359C34.6666 -1.17017 30.5124 6.29709 30.5124 6.29709C29.1849 2.74671 25.8433 1.63578 24.2182 1.64723C16.4706 1.7045 12.717 10.2598 11.5268 13.6727C10.8974 15.4594 10.0848 17.1888 9.05488 18.7693C3.57319 27.1757 -2.85836 26.6145 1.36449 30.0389C5.38135 33.2915 5.91921 36.9106 5.87344 38.8118C5.82766 40.7015 5.9421 42.5912 6.26254 44.4466C8.91755 59.885 18.2902 62.8742 25.9348 62.7253C30.3751 67.7646 36.0857 72.0022 42.1053 72.8039C45.9848 73.3192 49.2578 73.01 51.9471 72.0823C51.6725 73.0215 51.4207 74.0179 51.2261 74.9799C51.0316 75.9419 50.9172 76.9154 51.1117 77.9004C51.455 79.9046 53.0801 81.5882 55.0484 81.8974C55.9296 82.0463 56.8337 81.9432 57.5776 81.5309C57.692 81.4622 57.7836 81.3591 57.8293 81.2217C57.8866 81.0155 57.8179 80.8094 57.6577 80.672C54.9455 81.1072 52.382 78.7135 54.2588 73.9606C55.6435 70.456 56.6621 67.6157 50.6654 69.4138C49.6469 69.7001 48.5711 69.8834 47.4153 69.975C45.7216 70.1124 44.0164 70.0094 42.0824 69.8376C33.3506 69.0817 24.7675 58.1671 24.4013 51.6619C24.1152 46.5653 26.7817 45.7407 29.4481 45.9927C33.7511 46.3936 34.5064 58.5107 34.9413 61.3853C35.6623 66.1841 37.7794 65.7374 38.5462 64.0882C39.908 61.1334 40.2971 54.5022 44.2682 52.9102C46.8431 51.8795 49.4294 54.7312 51.1346 55.5787C56.7994 58.4305 49.0289 46.7142 51.7411 47.0006C55.1171 47.3556 57.4403 50.0814 58.6075 53.3454C60.1525 56.9645 59.4887 61.6717 59.3056 66.2643C63.6086 59.1635 61.4457 48.1688 53.4806 41.7551C52.0272 40.587 50.7569 39.5677 49.6698 38.64C52.2561 31.8255 60.244 24.2323 62.0522 21.4607C62.5214 20.7391 62.2467 19.7886 61.4686 19.4106L61.4571 19.4221ZM47.5869 36.7388C47.6899 36.8533 47.8044 36.9564 47.9188 37.0709C47.8044 36.9564 47.6899 36.8419 47.5869 36.7388ZM46.6714 35.6851C46.7401 35.7768 46.8202 35.8684 46.9003 35.96C46.8202 35.8684 46.7515 35.7768 46.6714 35.6851ZM46.9346 36.0173C47.0262 36.1203 47.1177 36.2349 47.2093 36.3379C47.1063 36.2349 47.0147 36.1203 46.9346 36.0173ZM49.2234 38.2735C49.3608 38.3995 49.5095 38.5254 49.6583 38.6514C49.5095 38.5254 49.3722 38.3995 49.2234 38.2735ZM48.3537 37.4947C48.4796 37.6092 48.6055 37.7237 48.7313 37.8497C48.6055 37.7352 48.4681 37.6092 48.3537 37.4947ZM46.6371 35.6508C44.0965 32.3523 45.5041 29.6838 52.6109 23.9345C52.6109 23.9345 49.2349 23.442 47.0605 21.3805C47.0605 21.3805 47.0376 24.1063 41.2927 25.5264C38.4317 26.2251 35.2159 26.8779 32.0231 27.1986C30.6383 38.8003 39.702 44.2977 39.702 44.2977C30.6841 39.0637 28.4182 32.2264 28.1092 27.3933C23.9665 27.3818 20.1785 26.5687 17.6722 24.2666C17.6722 24.2666 14.3992 36.7502 17.4434 48.2146C17.7638 49.4171 18.2788 50.7915 18.9654 52.246C15.7039 50.9632 13.2777 48.0542 12.6826 44.5038L11.893 39.854C11.0233 36.0058 9.18076 32.4325 6.52575 29.512L4.72904 27.5307C4.72904 27.5307 10.7143 22.3196 14.7769 16.8566C18.851 11.3822 23.3828 18.1623 27.7315 17.498C32.0803 16.8337 35.0443 13.1344 39.5189 14.0278C43.9935 14.9325 49.933 24.7362 55.0942 22.4342C55.0942 22.4342 50.1618 28.6531 46.6485 35.6508H46.6371Z" fill="currentColor" />
+                  <path d="M56.2843 76.377C55.9524 76.6289 55.9066 77.1099 56.1927 77.4192C56.4559 77.7055 56.9023 77.7169 57.1884 77.4535C59.6717 75.1057 58.6418 69.8488 57.3257 67.1001C57.1998 66.8482 56.8221 67.02 56.9137 67.2719C57.2112 68.0507 57.4058 68.8753 57.5431 69.6999C57.7949 71.3033 57.8521 73.0213 57.4058 74.5674C57.1884 75.3118 56.8107 75.9761 56.2957 76.3655L56.2843 76.377Z" fill="currentColor" />
+                  <path d="M44.9038 20.0411C44.7664 19.9151 44.6291 19.8006 44.4918 19.6746C42.6035 18.0025 40.6466 16.2731 39.2275 15.9983C38.7011 15.8952 38.1976 15.8608 37.6711 15.9066C36.172 16.0326 34.7415 16.7541 33.2309 17.51C31.6172 18.3232 29.9579 19.1707 27.9437 19.4799C27.8178 19.5028 27.6919 19.5143 27.5546 19.5257C25.5977 19.6861 23.8239 18.8157 22.0958 17.9681C20.6767 17.281 19.3492 16.6282 18.2277 16.7198C17.7127 16.7656 16.9002 16.9717 15.9275 18.2774C15.0348 19.4685 14.0735 20.6481 13.0894 21.759C13.6501 22.5836 15.1722 23.1219 16.1678 22.9501C17.6097 22.6982 17.9988 21.8736 17.9988 21.8736C17.9988 21.8736 19.8528 26.8556 25.4031 24.9887C28.493 23.9465 28.9393 22.0797 28.9393 22.0797C28.9393 22.0797 30.5987 25.4354 34.6499 24.7711C38.7011 24.1183 40.2346 20.8772 40.2346 20.8772C40.2346 20.8772 40.555 24.1641 43.9081 23.7633C44.6177 23.6717 45.167 23.2479 45.4645 22.6524C45.8994 21.7705 45.6476 20.6939 44.9152 20.0411H44.9038Z" fill="currentColor" />
+                </svg>
+              </div>
 
-            <div className="text-[116px] font-[750] uppercase leading-[0.9] tracking-[0em]">
-              MAR.
-            </div>
+              <div className="text-[88px] font-[750] uppercase leading-[0.9] tracking-[0em]">
+                {`${new Intl.DateTimeFormat(undefined, { month: "short" })
+                  .format(now)
+                  .replace(/\.$/, "")
+                  .toUpperCase()}. ${new Intl.DateTimeFormat(undefined, { day: "numeric" }).format(now)}`}
+              </div>
 
-            <div className="text-[116px] font-[750] leading-[0.9] tracking-[0em]">
-              {new Intl.DateTimeFormat(undefined, { day: "numeric" }).format(now)}
-            </div>
-
-            <div className="text-[116px] font-[750] leading-[0.98] tracking-[-0.005em] tabular-nums">
-              {now
-                .toLocaleTimeString(undefined, {
-                  hour: "numeric",
-                  minute: "2-digit",
-                  second: "2-digit",
-                  hour12: true,
-                })
-                .replace(/\s?(AM|PM)$/i, "")}
+              <div className="text-[88px] font-[750] leading-[0.98] tracking-[-0.00em] tabular-nums">
+                {now
+                  .toLocaleTimeString(undefined, {
+                    hour: "numeric",
+                    minute: "2-digit",
+                    second: "2-digit",
+                    hour12: true,
+                  })
+                  .replace(/\s?(AM|PM)$/i, "")}
+              </div>
             </div>
           </div>
         </div>
 
-        <div className="space-y-4 pb-8">
-          {error && (
-            <div className="rounded-xl border border-red-300 bg-red-50 p-4 text-sm text-red-700">
-              {error}
-            </div>
-          )}
+        <div className="fixed inset-x-0 bottom-0 z-40 px-6 pb-8">
+          <div className="mx-auto w-full max-w-[calc(100vw-3rem)] space-y-[-10px]">
+            {error && (
+              <div className="rounded-xl border border-red-300 bg-red-50 p-4 text-sm text-red-700">
+                {error}
+              </div>
+            )}
 
-          <HomeActionCard
-            title="Open"
-            subtitle={
-              loading
-                ? "Loading..."
-                : openingSubmitted
-                ? "Completed"
-                : todaysOpeningRun
-                ? "Resume checklist"
-                : "Start checklist"
-            }
-            onClick={() => void handleStaffOpen()}
-            disabled={loading}
-            completed={openingSubmitted}
-          />
+            <HomeActionCard
+              title="Open"
+              subtitle={
+                loading
+                  ? "Loading..."
+                  : openingSubmitted
+                  ? "Completed"
+                  : todaysOpeningRun
+                  ? "Resume checklist"
+                  : "Start checklist"
+              }
+              onClick={() => void handleStaffOpen()}
+              disabled={loading}
+              completed={openingSubmitted}
+            />
 
-          <HomeActionCard
-            title="Close"
-            subtitle={
-              loading
-                ? "Loading..."
-                : closingSubmitted
-                ? "Completed"
-                : todaysClosingRun
-                ? "Resume checklist"
-                : "Start checklist"
-            }
-            onClick={() => void handleStaffClose()}
-            disabled={loading}
-            completed={closingSubmitted}
-          />
+            <HomeActionCard
+              title="Close"
+              subtitle={
+                loading
+                  ? "Loading..."
+                  : closingSubmitted
+                  ? "Completed"
+                  : todaysClosingRun
+                  ? "Resume checklist"
+                  : "Start checklist"
+              }
+              onClick={() => void handleStaffClose()}
+              disabled={loading}
+              completed={closingSubmitted}
+            />
+          </div>
         </div>
       </main>
     );

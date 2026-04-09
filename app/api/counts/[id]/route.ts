@@ -1,3 +1,5 @@
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/client";
 
@@ -62,6 +64,7 @@ export async function GET(
 
       if (data && data.length === 0) {
         lines = data;
+        lastLineError = null;
         if (!resolvedLineForeignKey) {
           resolvedLineForeignKey = foreignKey;
         }
@@ -254,17 +257,55 @@ export async function GET(
             ? inventoryItemMap.get(inventoryItemId)
             : null;
 
-          return inventoryItem
+          const mergedLine = inventoryItem
             ? {
                 ...inventoryItem,
                 ...line,
               }
             : line;
+
+          return {
+            ...mergedLine,
+            is_saved: Boolean(
+              (mergedLine as { is_saved?: boolean | null; isSaved?: boolean | null }).is_saved ??
+                (mergedLine as { is_saved?: boolean | null; isSaved?: boolean | null }).isSaved ??
+                false
+            ),
+            isSaved: Boolean(
+              (mergedLine as { is_saved?: boolean | null; isSaved?: boolean | null }).is_saved ??
+                (mergedLine as { is_saved?: boolean | null; isSaved?: boolean | null }).isSaved ??
+                false
+            ),
+            created_at:
+              (mergedLine as { created_at?: string | null; createdAt?: string | null }).created_at ??
+              (mergedLine as { created_at?: string | null; createdAt?: string | null }).createdAt ??
+              null,
+            updated_at:
+              (mergedLine as { updated_at?: string | null; updatedAt?: string | null }).updated_at ??
+              (mergedLine as { updated_at?: string | null; updatedAt?: string | null }).updatedAt ??
+              null,
+          };
         });
       }
     }
 
-    return NextResponse.json({ lines: enrichedLines, countId: id, count });
+    const savedCount = enrichedLines.filter(
+      (line) => Boolean((line as { is_saved?: boolean | null }).is_saved)
+    ).length;
+    const totalCount = enrichedLines.length;
+
+    console.log("[counts/:id] enriched lines saved-state", {
+      countId: id,
+      savedCount,
+      totalCount,
+    });
+    return NextResponse.json({
+      lines: enrichedLines,
+      countId: id,
+      count,
+      savedCount,
+      totalCount,
+    });
   } catch (error) {
     return NextResponse.json(
       {
