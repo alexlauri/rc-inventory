@@ -1,5 +1,3 @@
-
-
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/client";
 
@@ -8,10 +6,10 @@ export const revalidate = 0;
 
 export async function GET(
   _request: Request,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const closingRunId = params.id;
+    const { id: closingRunId } = await params;
     const supabase = createClient();
 
     const [itemsResult, closingRunResult] = await Promise.all([
@@ -56,11 +54,9 @@ export async function GET(
       inventorySavedCount: savedLinesResult.count ?? 0,
     });
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Failed to load inventory progress";
+    const message =
+      error instanceof Error ? error.message : "Failed to load inventory progress";
 
-    return NextResponse.json(
-      { error: message },
-      { status: 500 }
-    );
+    return NextResponse.json({ error: message }, { status: 500 });
   }
 }
