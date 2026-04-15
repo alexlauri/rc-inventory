@@ -6,6 +6,15 @@ import { usePathname, useRouter } from "next/navigation";
 import "./globals.css";
 import localFont from "next/font/local";
 
+export const metadata = {
+  title: "Joplin",
+  description: "Operations Tools",
+  icons: {
+    icon: "/icon.png",
+    apple: "/apple-icon.png",
+  },
+};
+
 const cabinet = localFont({
   src: [
     { path: "../public/fonts/CabinetGrotesk-Regular.woff2", weight: "400", style: "normal" },
