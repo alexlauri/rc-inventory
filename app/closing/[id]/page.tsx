@@ -8,6 +8,7 @@ import StickySubmitButton from "@/app/components/StickySubmitButton";
 // import PageHeader from "@/app/components/PageHeader";
 import ChecklistToolsHeader from "@/app/components/ChecklistToolsHeader";
 import { H2 } from "@/app/components/Type";
+import { clientApiUrl, fetchErrorToUserMessage } from "@/lib/client-fetch";
 
 type ClosingRunStep = {
   id: string;
@@ -52,9 +53,12 @@ export default function ClosingRunPage() {
   useEffect(() => {
 
     async function loadViaDedicatedEndpoint() {
-      const res = await fetch(`/api/closing/${id}/inventory-progress?t=${Date.now()}`, {
-        cache: "no-store",
-      });
+      const res = await fetch(
+        clientApiUrl(`/api/closing/${id}/inventory-progress?t=${Date.now()}`),
+        {
+          cache: "no-store",
+        }
+      );
       const text = await res.text();
 
       let json: {
@@ -85,7 +89,7 @@ export default function ClosingRunPage() {
     }
 
     async function loadViaFallbackApis() {
-      const itemsRes = await fetch(`/api/items?t=${Date.now()}`, {
+      const itemsRes = await fetch(clientApiUrl(`/api/items?t=${Date.now()}`), {
         cache: "no-store",
       });
       const itemsText = await itemsRes.text();
@@ -108,9 +112,12 @@ export default function ClosingRunPage() {
       const items = itemsJson.items ?? [];
       setInventoryTotalCount(items.length);
 
-      const countRes = await fetch(`/api/counts?closing_run_id=${id}&t=${Date.now()}`, {
-        cache: "no-store",
-      });
+      const countRes = await fetch(
+        clientApiUrl(`/api/counts?closing_run_id=${id}&t=${Date.now()}`),
+        {
+          cache: "no-store",
+        }
+      );
       const countText = await countRes.text();
 
       let countJson: {
@@ -134,9 +141,12 @@ export default function ClosingRunPage() {
         return;
       }
 
-      const linesRes = await fetch(`/api/counts/${countId}?t=${Date.now()}`, {
-        cache: "no-store",
-      });
+      const linesRes = await fetch(
+        clientApiUrl(`/api/counts/${countId}?t=${Date.now()}`),
+        {
+          cache: "no-store",
+        }
+      );
       const linesText = await linesRes.text();
 
       let linesJson: {
@@ -220,7 +230,7 @@ export default function ClosingRunPage() {
         setError(null);
         setLoading(true);
 
-        const res = await fetch(`/api/closing/${id}?t=${Date.now()}`, {
+        const res = await fetch(clientApiUrl(`/api/closing/${id}?t=${Date.now()}`), {
           cache: "no-store",
         });
         const text = await res.text();
@@ -242,7 +252,7 @@ export default function ClosingRunPage() {
         setCashCountTotal(json.run?.cash_count_total ?? null);
         setReportCopied(Boolean(json.run?.report_copied));
       } catch (err) {
-        setError(err instanceof Error ? err.message : "Failed to load closing steps");
+        setError(fetchErrorToUserMessage(err));
       } finally {
         setLoading(false);
       }
@@ -259,7 +269,7 @@ export default function ClosingRunPage() {
 
     const interval = setInterval(async () => {
       try {
-        const res = await fetch(`/api/closing/${id}?t=${Date.now()}`, {
+        const res = await fetch(clientApiUrl(`/api/closing/${id}?t=${Date.now()}`), {
           cache: "no-store",
         });
         const text = await res.text();
@@ -374,7 +384,7 @@ export default function ClosingRunPage() {
       setError(null);
       setSavingStepId("inventory_count");
 
-      const res = await fetch("/api/counts", {
+      const res = await fetch(clientApiUrl("/api/counts"), {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -399,7 +409,7 @@ export default function ClosingRunPage() {
 
       router.push(`/counts/${json.count.id}?closing_run_id=${id}`);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to create inventory count");
+      setError(fetchErrorToUserMessage(err));
     } finally {
       setSavingStepId(null);
     }
@@ -488,7 +498,7 @@ export default function ClosingRunPage() {
           setError(null);
           setSavingStepId(step.id);
       
-          const res = await fetch("/api/counts", {
+          const res = await fetch(clientApiUrl("/api/counts"), {
             method: "POST",
             headers: {
               "Content-Type": "application/json",
@@ -513,7 +523,7 @@ export default function ClosingRunPage() {
       
           router.push(`/counts/${json.count.id}?closing_run_id=${id}`);
         } catch (err) {
-          setError(err instanceof Error ? err.message : "Failed to create inventory count");
+          setError(fetchErrorToUserMessage(err));
         } finally {
           setSavingStepId(null);
         }
@@ -532,7 +542,7 @@ export default function ClosingRunPage() {
 
       const user = JSON.parse(storedUser) as { id: string; name: string };
 
-      const res = await fetch(`/api/closing/${id}`, {
+      const res = await fetch(clientApiUrl(`/api/closing/${id}`), {
         method: "PATCH",
         headers: {
           "Content-Type": "application/json",
@@ -564,27 +574,63 @@ export default function ClosingRunPage() {
         )
       );
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to update closing step");
+      setError(fetchErrorToUserMessage(err));
     } finally {
       setSavingStepId(null);
     }
   }
 
   async function handleCopyReportMessage() {
+    if (!combinedReportMessage) {
+      setError("No report message available yet");
+      return;
+    }
+
+    setCopyingReport(true);
+    setError(null);
+
+    let copied = false;
     try {
-      if (!combinedReportMessage) {
-        throw new Error("No report message available yet");
+      await navigator.clipboard.writeText(combinedReportMessage);
+      copied = true;
+    } catch {
+      try {
+        const ta = document.createElement("textarea");
+        ta.value = combinedReportMessage;
+        ta.setAttribute("readonly", "");
+        ta.style.position = "fixed";
+        ta.style.left = "-9999px";
+        document.body.appendChild(ta);
+        ta.focus();
+        ta.select();
+        copied = document.execCommand("copy");
+        document.body.removeChild(ta);
+      } catch {
+        copied = false;
+      }
+    }
+
+    if (!copied) {
+      setError("Could not copy to clipboard. Try selecting the text manually.");
+      setCopyingReport(false);
+      return;
+    }
+
+    setReportCopiedJustNow(true);
+    window.setTimeout(() => {
+      setReportCopiedJustNow(false);
+    }, 1500);
+
+    try {
+      let storedUser: { name?: string } | null = null;
+      try {
+        const raw = window.localStorage.getItem("rc_user");
+        if (raw) storedUser = JSON.parse(raw) as { name?: string };
+      } catch {
+        storedUser = null;
       }
 
-      setCopyingReport(true);
-      setError(null);
-
-      await navigator.clipboard.writeText(combinedReportMessage);
-      const storedUser = typeof window !== "undefined"
-        ? JSON.parse(window.localStorage.getItem("rc_user") || "null")
-        : null;
-
-      await fetch(`/api/closing/${id}`, {
+      const res = await fetch(clientApiUrl(`/api/closing/${id}`), {
         method: "PATCH",
         headers: {
           "Content-Type": "application/json",
@@ -594,14 +640,25 @@ export default function ClosingRunPage() {
           report_copied_by_name: storedUser?.name ?? null,
         }),
       });
-      setReportCopied(true);
-      setReportCopiedJustNow(true);
 
-      window.setTimeout(() => {
-        setReportCopiedJustNow(false);
-      }, 1500);
+      const text = await res.text();
+      let json: { error?: string } = {};
+      try {
+        json = text ? JSON.parse(text) : {};
+      } catch {
+        json = {};
+      }
+
+      if (!res.ok) {
+        throw new Error(json.error || "Failed to update report status");
+      }
+
+      setReportCopied(true);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to copy report message");
+      setReportCopied(true);
+      setError(
+        `${fetchErrorToUserMessage(err)} The report was still copied to your clipboard.`
+      );
     } finally {
       setCopyingReport(false);
     }
@@ -620,7 +677,7 @@ export default function ClosingRunPage() {
         throw new Error("No logged in user found");
       }
 
-      const res = await fetch(`/api/closing/${id}`, {
+      const res = await fetch(clientApiUrl(`/api/closing/${id}`), {
         method: "PUT",
         headers: {
           "Content-Type": "application/json",
@@ -646,7 +703,7 @@ export default function ClosingRunPage() {
 
       router.push("/");
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to submit closing checklist");
+      setError(fetchErrorToUserMessage(err));
     } finally {
       setSubmitting(false);
     }

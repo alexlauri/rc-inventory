@@ -1,84 +1,27 @@
 "use client";
 
-import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 
-type CountLine = {
-  id: string;
-  item_name: string;
-  item_unit: string;
-  item_category: string;
-  item_supplier?: string | null;
-  supplier?: string | null;
-  supplier_name?: string | null;
-  distributor?: string | null;
-  distributor_name?: string | null;
-  item_distributor?: string | null;
-  vendor?: string | null;
-  vendor_name?: string | null;
-  item_vendor?: string | null;
-  source?: string | null;
-  item_source?: string | null;
-  purchased_from?: string | null;
-  order_from?: string | null;
-  item_threshold: number;
-  item_par: number;
-  item_sort_order: number;
-  trailer_qty: number;
-  storage_qty: number;
-};
+import LoadingSpinner from "@/app/components/LoadingSpinner";
+import PageHeader from "@/app/components/PageHeader";
+import ReportItemCard, {
+  ReportItemsTableHead,
+  type CountLine,
+  type ReportItem,
+  getSupplierLabel,
+} from "@/app/components/ReportItemCard";
+import StickySubmitButton from "@/app/components/StickySubmitButton";
 
-function getSupplierLabel(item: ReportItem) {
-  const line = item as ReportItem & {
-    item_supplier?: string | null;
-    supplier?: string | null;
-    supplier_name?: string | null;
-    distributor?: string | null;
-    distributor_name?: string | null;
-    item_distributor?: string | null;
-    vendor?: string | null;
-    vendor_name?: string | null;
-    item_vendor?: string | null;
-    source?: string | null;
-    item_source?: string | null;
-    purchased_from?: string | null;
-    order_from?: string | null;
-  };
-
-  return (
-    line.item_supplier ||
-    line.supplier ||
-    line.supplier_name ||
-    line.distributor ||
-    line.distributor_name ||
-    line.item_distributor ||
-    line.vendor ||
-    line.vendor_name ||
-    line.item_vendor ||
-    line.source ||
-    line.item_source ||
-    line.purchased_from ||
-    line.order_from ||
-    "Other"
-  );
+function formatInventoryQty(value: number) {
+  return Number.isInteger(value)
+    ? String(value)
+    : String(value.toFixed(2)).replace(/\.?0+$/, "");
 }
 
-type ReportItem = CountLine & {
-  total: number;
-  status: "critical" | "low";
-  suggestedOrderQty: number;
-};
-
 function buildInventoryReportMessage(items: ReportItem[]) {
-  const today = new Date();
-  const formattedDate = today.toLocaleDateString("en-US", {
-    month: "long",
-    day: "numeric",
-  });
-
   if (items.length === 0) {
-    return `Rolling Cones Order Guide - ${formattedDate}\n\nNo items need to be reordered.`;
+    return "Rolling Cones Order Guide\n\nNo items need to be reordered.";
   }
 
   const groupedItems = items.reduce<Record<string, ReportItem[]>>((acc, item) => {
@@ -92,7 +35,7 @@ function buildInventoryReportMessage(items: ReportItem[]) {
     return acc;
   }, {});
 
-  const sections: string[] = [`Rolling Cones Order Guide - ${formattedDate}`];
+  const sections: string[] = ["Rolling Cones Order Guide"];
 
   Object.entries(groupedItems)
     .sort(([a], [b]) => a.localeCompare(b))
@@ -103,9 +46,7 @@ function buildInventoryReportMessage(items: ReportItem[]) {
       const lowItems = supplierItems.filter((item) => item.status === "low");
 
       [...criticalItems, ...lowItems].forEach((item) => {
-        sections.push(
-          `- ${item.item_name}: order ${item.suggestedOrderQty} ${item.item_unit}`
-        );
+        sections.push(`- ${item.item_name} (${formatInventoryQty(item.total)} ${item.item_unit})`);
       });
     });
 
@@ -117,6 +58,7 @@ export default function CountReportPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const closingRunId = searchParams.get("closing_run_id");
+  const reportSync = searchParams.get("report_sync");
   const countId = params?.id;
 
   const [lines, setLines] = useState<CountLine[]>([]);
@@ -132,8 +74,15 @@ export default function CountReportPage() {
       try {
         setLoading(true);
         setError(null);
+        setLines([]);
 
-        const res = await fetch(`/api/counts/${countId}`);
+        const res = await fetch(`/api/counts/${countId}?t=${Date.now()}`, {
+          cache: "no-store",
+          headers: {
+            "Cache-Control": "no-cache",
+            Pragma: "no-cache",
+          },
+        });
         const json = await res.json();
 
         if (!res.ok) {
@@ -150,13 +99,15 @@ export default function CountReportPage() {
     }
 
     loadLines();
-  }, [countId]);
+  }, [countId, reportSync]);
 
   const reportItems = useMemo<ReportItem[]>(() => {
 
     return lines
       .map((line) => {
-        const total = line.trailer_qty + line.storage_qty;
+        const trailer_qty = Number(line.trailer_qty ?? 0);
+        const storage_qty = Number(line.storage_qty ?? 0);
+        const total = trailer_qty + storage_qty;
         const status =
           total === 0
             ? "critical"
@@ -168,6 +119,8 @@ export default function CountReportPage() {
 
         return {
           ...line,
+          trailer_qty,
+          storage_qty,
           total,
           status,
           suggestedOrderQty: Math.max(line.item_par - total, 0),
@@ -395,30 +348,25 @@ export default function CountReportPage() {
 
   const isSubmitted = countStatus === "submitted";
 
+  const countBackHref =
+    countId != null && countId !== ""
+      ? `/counts/${countId}${
+          closingRunId ? `?closing_run_id=${closingRunId}` : ""
+        }`
+      : "/";
+
   return (
     <>
-      <main className="mx-auto max-w-md p-6 space-y-6 pb-32">
-        <div className="pt-4">
-          <Link
-            href={
-              countId
-                ? `/counts/${countId}${
-                    closingRunId ? `?closing_run_id=${closingRunId}` : ""
-                  }`
-                : "/"
-            }
-            className="text-sm text-gray-600 underline"
-          >
-            ← Back to Count
-          </Link>
-        </div>
-
-        <div className="space-y-1">
-          <h1 className="text-3xl font-semibold">Report</h1>
-          <p className="text-sm text-gray-600">
-            Review low and critical items before saving inventory.
-          </p>
-        </div>
+      <main
+        className="min-h-screen w-full space-y-4 px-6 pb-32 pt-4"
+        style={{ backgroundColor: "var(--color-surface-page, #F7F3EB)" }}
+      >
+        <PageHeader
+          title="Report"
+          backHref={countBackHref}
+          className="text-[var(--color-primary,#004DEA)]"
+          titleClassName="text-[var(--color-primary,#004DEA)]"
+        />
 
         {error && (
           <div className="rounded border border-red-300 bg-red-50 p-4 text-sm text-red-700">
@@ -427,7 +375,7 @@ export default function CountReportPage() {
         )}
 
         {loading ? (
-          <p className="text-sm text-gray-600">Loading report...</p>
+          <LoadingSpinner />
         ) : reportItems.length === 0 ? (
           <div className="rounded-2xl border border-dashed p-6 text-sm text-gray-600">
             No low or critical items found in this count.
@@ -437,99 +385,68 @@ export default function CountReportPage() {
             {criticalItems.length > 0 && (
               <section className="space-y-3">
                 <h2 className="text-lg font-semibold text-red-700">Critical</h2>
-                {criticalItems.map((item) => (
-                  <ReportCard key={item.id} item={item} />
-                ))}
+                <div className="overflow-x-auto rounded-2xl border border-black/10 bg-white">
+                  <table className="w-full min-w-[280px] border-collapse text-sm">
+                    <ReportItemsTableHead />
+                    <tbody>
+                      {criticalItems.map((item) => (
+                        <ReportItemCard key={item.id} item={item} />
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
               </section>
             )}
 
             {lowItems.length > 0 && (
               <section className="space-y-3">
                 <h2 className="text-lg font-semibold text-yellow-700">Low</h2>
-                {lowItems.map((item) => (
-                  <ReportCard key={item.id} item={item} />
-                ))}
+                <div className="overflow-x-auto rounded-2xl border border-black/10 bg-white">
+                  <table className="w-full min-w-[280px] border-collapse text-sm">
+                    <ReportItemsTableHead />
+                    <tbody>
+                      {lowItems.map((item) => (
+                        <ReportItemCard key={item.id} item={item} />
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
               </section>
             )}
           </div>
         )}
       </main>
 
-      <div className="pointer-events-none fixed inset-x-0 bottom-0 z-40">
-        <div className="mx-auto flex max-w-md justify-center px-4 pb-4">
-          <div className="pointer-events-auto w-full rounded-2xl bg-white/95 p-3 shadow-lg ring-1 ring-black/5 backdrop-blur">
-            <button
-              onClick={() => {
-                if (!isSubmitted) {
-                  void handleSubmitReport();
-                  return;
-                }
+      <StickySubmitButton
+        disabled={submitting || loading}
+        onClick={() => {
+          if (!isSubmitted) {
+            void handleSubmitReport();
+            return;
+          }
 
-                void (async () => {
-                  try {
-                    setSubmitting(true);
-                    await completeInventoryStep();
-                    const reportMessage = await persistReportMessage();
-                    await ensureClosingRunHasReportMessage(reportMessage);
+          void (async () => {
+            try {
+              setSubmitting(true);
+              await completeInventoryStep();
+              const reportMessage = await persistReportMessage();
+              await ensureClosingRunHasReportMessage(reportMessage);
 
-                    if (closingRunId && typeof window !== "undefined") {
-                      window.sessionStorage.setItem(`inventory_report_scroll_${closingRunId}`, "true");
-                    }
+              if (closingRunId && typeof window !== "undefined") {
+                window.sessionStorage.setItem(`inventory_report_scroll_${closingRunId}`, "true");
+              }
 
-                    router.push(closingRunId ? `/closing/${closingRunId}` : "/");
-                  } catch (err) {
-                    setError(err instanceof Error ? err.message : "Failed to save report");
-                  } finally {
-                    setSubmitting(false);
-                  }
-                })();
-              }}
-              disabled={submitting || loading}
-              className="w-full rounded-xl bg-black px-4 py-3 text-white font-medium disabled:opacity-50"
-            >
-              {submitting ? "Saving..." : "Save Report"}
-            </button>
-          </div>
-        </div>
-      </div>
+              router.push(closingRunId ? `/closing/${closingRunId}` : "/");
+            } catch (err) {
+              setError(err instanceof Error ? err.message : "Failed to save report");
+            } finally {
+              setSubmitting(false);
+            }
+          })();
+        }}
+      >
+        {submitting ? "Saving..." : "Save Report"}
+      </StickySubmitButton>
     </>
-  );
-}
-
-function ReportCard({ item }: { item: ReportItem }) {
-  return (
-    <div className="space-y-2 rounded-lg border bg-white p-4">
-      <div className="flex items-start justify-between gap-3">
-        <div>
-          <div className="font-medium">{item.item_name}</div>
-          <div className="text-sm text-gray-600">
-            {item.item_category} · {item.item_unit}
-          </div>
-        </div>
-
-        <div
-          className={`rounded border px-2 py-1 text-xs font-medium ${
-            item.status === "critical"
-              ? "border-red-200 bg-red-50 text-red-700"
-              : "border-yellow-200 bg-yellow-50 text-yellow-700"
-          }`}
-        >
-          {item.status.toUpperCase()}
-        </div>
-      </div>
-
-      <div className="grid grid-cols-2 gap-3 text-sm text-gray-700">
-        <div>Trailer: {item.trailer_qty}</div>
-        <div>Storage: {item.storage_qty}</div>
-        <div>Total: {item.total}</div>
-        <div>
-          Order: {item.suggestedOrderQty} {item.item_unit}
-        </div>
-      </div>
-
-      <div className="text-sm text-gray-600">
-        Supplier: {getSupplierLabel(item)}
-      </div>
-    </div>
   );
 }

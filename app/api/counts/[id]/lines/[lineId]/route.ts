@@ -13,6 +13,8 @@ export async function PATCH(
     const trailer_qty = Number(body.trailer_qty ?? 0);
     const storage_qty = Number(body.storage_qty ?? 0);
 
+    // Match by line id only so updates succeed even when the count FK column
+    // name differs from inventory_count_id (GET tries several FKs).
     const { data, error } = await supabase
       .from("inventory_count_lines")
       .update({
@@ -22,7 +24,6 @@ export async function PATCH(
         updated_at: new Date().toISOString(),
       })
       .eq("id", lineId)
-      .eq("inventory_count_id", id)
       .select("*")
       .single();
 
@@ -36,6 +37,20 @@ export async function PATCH(
         },
         { status: 500 }
       );
+    }
+
+    if (data) {
+      const row = data as Record<string, unknown>;
+      const countFk =
+        (typeof row.inventory_count_id === "string" && row.inventory_count_id) ||
+        (typeof row.count_id === "string" && row.count_id) ||
+        null;
+      if (countFk !== null && countFk !== id) {
+        return NextResponse.json(
+          { error: "Line does not belong to this count" },
+          { status: 403 }
+        );
+      }
     }
 
     return NextResponse.json({ line: data });

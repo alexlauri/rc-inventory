@@ -3,6 +3,15 @@ export const revalidate = 0;
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/client";
 
+function coerceQty(value: unknown): number {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value === "string" && value.trim() !== "") {
+    const n = Number(value);
+    return Number.isFinite(n) ? n : 0;
+  }
+  return 0;
+}
+
 export async function GET(
   request: Request,
   context: { params: Promise<{ id: string }> }
@@ -289,10 +298,29 @@ export async function GET(
       }
     }
 
-    const savedCount = enrichedLines.filter(
-      (line) => Boolean((line as { is_saved?: boolean | null }).is_saved)
+    // Pin quantities to the raw count-line row. Merging catalog `inventory_items`
+    // can leave trailer_qty/storage_qty from the item (often 0) or odd typings.
+    const linesForResponse = enrichedLines.map((enriched, index) => {
+      const r = enriched as Record<string, unknown>;
+      const countRow =
+        index < synchronizedLines.length
+          ? (synchronizedLines[index] as Record<string, unknown>)
+          : undefined;
+      const trailerSource =
+        countRow !== undefined ? countRow.trailer_qty : r.trailer_qty;
+      const storageSource =
+        countRow !== undefined ? countRow.storage_qty : r.storage_qty;
+      return {
+        ...r,
+        trailer_qty: coerceQty(trailerSource),
+        storage_qty: coerceQty(storageSource),
+      };
+    });
+
+    const savedCount = linesForResponse.filter((line) =>
+      Boolean((line as { is_saved?: boolean | null }).is_saved)
     ).length;
-    const totalCount = enrichedLines.length;
+    const totalCount = linesForResponse.length;
 
     console.log("[counts/:id] enriched lines saved-state", {
       countId: id,
@@ -300,7 +328,7 @@ export async function GET(
       totalCount,
     });
     return NextResponse.json({
-      lines: enrichedLines,
+      lines: linesForResponse,
       countId: id,
       count,
       savedCount,

@@ -7,6 +7,7 @@ type InventoryItem = {
   item_category: string | null;
   item_unit: string | null;
   item_par?: number | null;
+  item_threshold?: number | null;
   trailer_qty: number;
   storage_qty: number;
   total?: number;
@@ -31,6 +32,11 @@ function buildMetaLabel(item: InventoryItem) {
   return `${unit} • PAR ${par}`;
 }
 
+function getQuantityStep(item: InventoryItem) {
+  const threshold = item.item_threshold ?? 0;
+  return Number.isInteger(threshold) ? 1 : 0.25;
+}
+
 export default function InventoryItemCard({
   item,
   onTrailerChange,
@@ -39,6 +45,8 @@ export default function InventoryItemCard({
   saveLabel = "Save",
   saveDisabled = false,
 }: InventoryItemCardProps) {
+  const step = getQuantityStep(item);
+
   return (
     <div className="space-y-3 rounded-[28px] bg-transparent">
       <div className="space-y-1">
@@ -56,6 +64,7 @@ export default function InventoryItemCard({
 
           <QuantityPicker
             value={item.trailer_qty}
+            step={step}
             onChange={(next) => {
               onTrailerChange?.(next);
             }}
@@ -69,6 +78,7 @@ export default function InventoryItemCard({
 
           <QuantityPicker
             value={item.storage_qty}
+            step={step}
             onChange={(next) => {
               onStorageChange?.(next);
             }}

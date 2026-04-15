@@ -33,6 +33,8 @@ export default function RootLayout({
   const [user, setUser] = useState<LoggedInUser | null>(null);
   const isAdmin = (user?.role ?? "").trim().toLowerCase() === "admin";
   const showGlobalHeader = pathname === "/" && isAdmin;
+  const usePrimaryOverscrollBg =
+    pathname?.startsWith("/opening/") || pathname?.startsWith("/closing/");
   const shellClassName = "min-h-screen w-full";
 
   useEffect(() => {
@@ -74,14 +76,28 @@ export default function RootLayout({
   if (!checkedAuth && pathname !== "/login") {
     return (
       <html lang="en">
-        <body className="bg-white text-black" />
+        <body
+          className="text-black"
+          style={{
+            backgroundColor: usePrimaryOverscrollBg
+              ? "var(--color-primary, #004DEA)"
+              : "#ffffff",
+          }}
+        />
       </html>
     );
   }
 
   return (
     <html lang="en">
-      <body className={`${cabinet.variable} bg-white text-black`}>
+      <body
+        className={`${cabinet.variable} text-black`}
+        style={{
+          backgroundColor: usePrimaryOverscrollBg
+            ? "var(--color-primary, #004DEA)"
+            : "#ffffff",
+        }}
+      >
         <div className={shellClassName}>
           {pathname !== "/login" && showGlobalHeader && (
             <header className="sticky top-0 z-10 border-b bg-white">

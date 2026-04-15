@@ -44,8 +44,13 @@ export default function ChecklistToolsHeader({
 }: ChecklistToolsHeaderProps) {
   return (
     <div
-      className="relative left-1/2 right-1/2 -ml-[50vw] -mr-[50vw] w-screen px-6 space-y-0 pt-4 pb-4 -mt-4 rounded-b-[44px]"
-      style={{ backgroundColor: "var(--color-primary, #004DEA)" }}
+      className="relative left-1/2 right-1/2 -ml-[50vw] -mr-[50vw] w-screen space-y-0 rounded-b-[44px] px-6 pb-4"
+      style={{
+        backgroundColor: "var(--color-primary, #004DEA)",
+        // Fill the top safe area (iOS notch/status bar region) with header blue.
+        paddingTop: "calc(1rem + env(safe-area-inset-top, 0px))",
+        marginTop: "calc(-1rem - env(safe-area-inset-top, 0px))",
+      }}
     >
       <div className="text-white">
         <PageHeader title={title} backHref={backHref} />

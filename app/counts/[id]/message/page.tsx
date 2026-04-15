@@ -1,8 +1,10 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
 import { useParams, useSearchParams } from "next/navigation";
+import { useEffect, useMemo, useState } from "react";
+
+import LoadingSpinner from "@/app/components/LoadingSpinner";
 
 type CountLine = {
   id: string;
@@ -262,7 +264,7 @@ export default function CountMessagePage() {
         )}
 
         {loading ? (
-          <p className="text-sm text-gray-600">Loading message...</p>
+          <LoadingSpinner />
         ) : !isSubmitted ? (
           <div className="rounded-2xl border border-dashed p-6 text-sm text-gray-600">
             This report has not been submitted yet.

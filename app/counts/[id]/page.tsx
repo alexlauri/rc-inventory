@@ -1,7 +1,8 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
+import LoadingSpinner from "@/app/components/LoadingSpinner";
 import PageHeader from "@/app/components/PageHeader";
 import StickySubmitButton from "@/app/components/StickySubmitButton";
 import InventoryItemCard from "@/app/components/InventoryItemCard";
@@ -37,8 +38,10 @@ export default function CountDetailPage() {
   const lastLocalEditAtRef = useRef(0);
   const hasHydratedLocalProgressRef = useRef(false);
   const lastFetchedServerLinesRef = useRef<Record<string, string | null>>({});
+  const linesRef = useRef<CountLine[]>([]);
   const storageKey = countId ? `weekly-count-progress:${countId}` : null;
   const collapsedStorageKey = countId ? `weekly-count-collapsed:${countId}` : null;
+  const [continueBusy, setContinueBusy] = useState(false);
 
   async function fetchLinesInBackground() {
     if (!countId) return;
@@ -169,6 +172,11 @@ export default function CountDetailPage() {
   }, [countId]);
 
   useEffect(() => {
+    if (!countId || loading) return;
+    router.prefetch(`/counts/${countId}/report`);
+  }, [countId, loading, router]);
+
+  useEffect(() => {
     if (!countId) return;
 
     let cancelled = false;
@@ -178,7 +186,7 @@ export default function CountDetailPage() {
         return;
       }
 
-      if (Date.now() - lastLocalEditAtRef.current < 1200) {
+      if (Date.now() - lastLocalEditAtRef.current < 3500) {
         return;
       }
 
@@ -222,6 +230,8 @@ export default function CountDetailPage() {
 
     return grouped;
   }, [lines]);
+
+  linesRef.current = lines;
 
   async function updateLine(
     lineId: string,
@@ -292,6 +302,81 @@ export default function CountDetailPage() {
     }
   }
 
+  /** Persists picker edits so background poll cannot wipe them before Continue flushes to the API. */
+  const recordUnsavedLineQuantities = useCallback(
+    (lineId: string, trailer_qty: number, storage_qty: number) => {
+      lastLocalEditAtRef.current = Date.now();
+      if (!storageKey) return;
+      try {
+        const raw = localStorage.getItem(storageKey);
+        const current = raw ? (JSON.parse(raw) as Record<string, unknown>) : {};
+        localStorage.setItem(
+          storageKey,
+          JSON.stringify({
+            ...current,
+            [lineId]: { trailer_qty, storage_qty },
+          })
+        );
+      } catch {
+        // ignore quota / privacy errors
+      }
+    },
+    [storageKey]
+  );
+
+  function readProgressDraft(): Record<
+    string,
+    { trailer_qty: number; storage_qty: number }
+  > {
+    if (!storageKey) return {};
+    try {
+      const raw = localStorage.getItem(storageKey);
+      if (!raw) return {};
+      return JSON.parse(raw) as Record<
+        string,
+        { trailer_qty: number; storage_qty: number }
+      >;
+    } catch {
+      return {};
+    }
+  }
+
+  async function flushAllLinesToServer(): Promise<void> {
+    if (!countId) return;
+
+    const snapshot = linesRef.current;
+    const draft = readProgressDraft();
+
+    const updates = snapshot
+      .filter((line) => line.id != null && line.id !== "")
+      .map((line) => {
+        const persisted = draft[line.id];
+        const trailer_qty = Number(
+          persisted?.trailer_qty ?? line.trailer_qty ?? 0
+        );
+        const storage_qty = Number(
+          persisted?.storage_qty ?? line.storage_qty ?? 0
+        );
+        return { lineId: line.id, trailer_qty, storage_qty };
+      });
+
+    if (updates.length === 0) return;
+
+    const res = await fetch(`/api/counts/${countId}/lines/batch`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ updates }),
+    });
+
+    const json = await res.json();
+
+    if (!res.ok) {
+      throw new Error(json.error || "Failed to save counts");
+    }
+  }
+
   return (
     <>
       <main
@@ -312,7 +397,7 @@ export default function CountDetailPage() {
       )}
 
       {loading ? (
-        <p className="text-sm text-gray-600">Loading items...</p>
+        <LoadingSpinner />
       ) : (
         <div className="space-y-10">
           {Object.entries(groupedLines).map(([category, categoryLines]) => (
@@ -326,6 +411,7 @@ export default function CountDetailPage() {
                   key={line.id}
                   line={line}
                   onSave={updateLine}
+                  onUserQuantityChange={recordUnsavedLineQuantities}
                   collapsed={!!collapsedLineIds[line.id]}
                   onExpand={() => {
                     setCollapsedLineIds((prev) => {
@@ -352,30 +438,49 @@ export default function CountDetailPage() {
       </main>
 
       <StickySubmitButton
-        label="Continue"
-        disabled={!countId}
+        disabled={!countId || continueBusy || loading}
         onClick={() => {
-          if (!countId) return;
+          void (async () => {
+            if (!countId) return;
 
-          if (storageKey) {
             try {
-              localStorage.removeItem(storageKey);
-            } catch {}
-          }
+              setContinueBusy(true);
+              setError(null);
+              await flushAllLinesToServer();
 
-          if (collapsedStorageKey) {
-            try {
-              localStorage.removeItem(collapsedStorageKey);
-            } catch {}
-          }
+              if (storageKey) {
+                try {
+                  localStorage.removeItem(storageKey);
+                } catch {}
+              }
 
-          router.push(
-            `/counts/${countId}/report${
-              closingRunId ? `?closing_run_id=${closingRunId}` : ""
-            }`
-          );
+              if (collapsedStorageKey) {
+                try {
+                  localStorage.removeItem(collapsedStorageKey);
+                } catch {}
+              }
+
+              const reportQs = new URLSearchParams();
+              reportQs.set("report_sync", String(Date.now()));
+              if (closingRunId) {
+                reportQs.set("closing_run_id", closingRunId);
+              }
+
+              router.push(
+                `/counts/${countId}/report?${reportQs.toString()}`
+              );
+            } catch (err) {
+              setError(
+                err instanceof Error ? err.message : "Failed to save counts before report"
+              );
+            } finally {
+              setContinueBusy(false);
+            }
+          })();
         }}
-      />
+      >
+        {continueBusy ? "Saving…" : "Continue"}
+      </StickySubmitButton>
     </>
   );
 }
@@ -383,6 +488,7 @@ export default function CountDetailPage() {
 function InventoryLineCard({
   line,
   onSave,
+  onUserQuantityChange,
   collapsed,
   onExpand,
 }: {
@@ -392,6 +498,12 @@ function InventoryLineCard({
     trailer_qty: number,
     storage_qty: number
   ) => Promise<void>;
+  /** Called when the user changes trailer/storage pickers (not on server-driven sync). */
+  onUserQuantityChange?: (
+    lineId: string,
+    trailer_qty: number,
+    storage_qty: number
+  ) => void;
   collapsed: boolean;
   onExpand: () => void;
 }) {
@@ -404,6 +516,16 @@ function InventoryLineCard({
     setTrailer(line.trailer_qty);
     setStorage(line.storage_qty);
   }, [line.trailer_qty, line.storage_qty]);
+
+  function handleTrailerChange(next: number) {
+    setTrailer(next);
+    onUserQuantityChange?.(line.id, next, storage);
+  }
+
+  function handleStorageChange(next: number) {
+    setStorage(next);
+    onUserQuantityChange?.(line.id, trailer, next);
+  }
 
   if (collapsed) {
     return (
@@ -450,11 +572,12 @@ function InventoryLineCard({
         item_category: line.item_category,
         item_unit: line.item_unit,
         item_par: line.item_par,
+        item_threshold: line.item_threshold,
         trailer_qty: trailer,
         storage_qty: storage,
       }}
-      onTrailerChange={setTrailer}
-      onStorageChange={setStorage}
+      onTrailerChange={handleTrailerChange}
+      onStorageChange={handleStorageChange}
       onSave={() => {
         void (async () => {
           try {
