@@ -43,7 +43,7 @@ export default function FeaturedToolTile({
             <div className="flex min-w-0 flex-1 items-center">
               <div className="min-w-0 mt-1 [font-family:var(--font-cabinet)]">
                 <div className="text-[18px] ml-3 font-[650] leading-[0.75] text-white">Send report</div>
-                <div className="mt-2 ml-3 text-[16px] leading-[1.1] text-white/80">Send to Nikki and Alex</div>
+                <div className="mt-2 ml-3 text-[16px] leading-[1.1] text-white/80">Copy and text</div>
               </div>
             </div>
 

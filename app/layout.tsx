@@ -22,6 +22,18 @@ type LoggedInUser = {
   role?: string;
 };
 
+function getRootBackgroundColor(pathname: string | null) {
+  if (pathname === "/login") {
+    return "#ffffff";
+  }
+
+  if (pathname?.startsWith("/opening/") || pathname?.startsWith("/closing/")) {
+    return "var(--color-primary, #004DEA)";
+  }
+
+  return "var(--color-cream, #F7F3EB)";
+}
+
 export default function RootLayout({
   children,
 }: {
@@ -33,8 +45,7 @@ export default function RootLayout({
   const [user, setUser] = useState<LoggedInUser | null>(null);
   const isAdmin = (user?.role ?? "").trim().toLowerCase() === "admin";
   const showGlobalHeader = pathname === "/" && isAdmin;
-  const usePrimaryOverscrollBg =
-    pathname?.startsWith("/opening/") || pathname?.startsWith("/closing/");
+  const rootBackgroundColor = getRootBackgroundColor(pathname);
   const shellClassName = "min-h-screen w-full";
 
   useEffect(() => {
@@ -78,25 +89,20 @@ export default function RootLayout({
       <html lang="en">
         <body
           className="text-black"
-          style={{
-            backgroundColor: usePrimaryOverscrollBg
-              ? "var(--color-primary, #004DEA)"
-              : "#ffffff",
-          }}
+          style={{ backgroundColor: rootBackgroundColor }}
         />
       </html>
     );
   }
 
   return (
-    <html lang="en">
+    <html
+      lang="en"
+      style={{ backgroundColor: rootBackgroundColor }}
+    >
       <body
         className={`${cabinet.variable} text-black`}
-        style={{
-          backgroundColor: usePrimaryOverscrollBg
-            ? "var(--color-primary, #004DEA)"
-            : "#ffffff",
-        }}
+        style={{ backgroundColor: rootBackgroundColor }}
       >
         <div className={shellClassName}>
           {pathname !== "/login" && showGlobalHeader && (
