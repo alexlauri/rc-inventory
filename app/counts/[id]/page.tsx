@@ -15,6 +15,7 @@ type CountLine = {
   item_category: string;
   item_threshold: number;
   item_par: number;
+  count_increment?: number | null;
   item_sort_order: number;
   trailer_qty: number;
   storage_qty: number;
@@ -32,6 +33,7 @@ export default function CountDetailPage() {
   const countId = params?.id;
 
   const [lines, setLines] = useState<CountLine[]>([]);
+  const [searchQuery, setSearchQuery] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [collapsedLineIds, setCollapsedLineIds] = useState<Record<string, boolean>>({});
@@ -216,6 +218,28 @@ export default function CountDetailPage() {
     };
   }, [countId, loading]);
 
+  const normalizedSearchQuery = searchQuery.trim().toLowerCase();
+
+  const matchingLineIds = useMemo(() => {
+    if (!normalizedSearchQuery) {
+      return new Set(lines.map((line) => line.id));
+    }
+
+    return new Set(
+      lines
+        .filter((line) =>
+          line.item_name.toLowerCase().includes(normalizedSearchQuery)
+        )
+        .map((line) => line.id)
+    );
+  }, [lines, normalizedSearchQuery]);
+
+  const visibleLineCount = useMemo(() => {
+    if (!normalizedSearchQuery) return lines;
+
+    return lines.filter((line) => matchingLineIds.has(line.id));
+  }, [lines, matchingLineIds, normalizedSearchQuery]);
+
   const groupedLines = useMemo(() => {
     const grouped: Record<string, CountLine[]> = {};
 
@@ -390,6 +414,19 @@ export default function CountDetailPage() {
           titleClassName="text-[var(--color-primary,#004DEA)]"
         />
 
+        <div className="sticky top-0 z-20 py-4">
+          <input
+            id="count-search"
+            type="search"
+            value={searchQuery}
+            onChange={(event) => {
+              setSearchQuery(event.target.value);
+            }}
+            placeholder="Start typing an item name"
+            className="h-14 w-full rounded-full border border-[rgba(0,77,234,0.16)] bg-white/95 px-4 text-base font-[700] leading-none text-[var(--color-foreground,#3A3A3A)] outline-none transition placeholder:font-[700] placeholder:text-[rgba(58,58,58,0.55)] focus:border-[var(--color-primary,#004DEA)] [font-family:var(--font-cabinet)]"
+          />
+        </div>
+
       {error && (
         <div className="rounded border border-red-300 bg-red-50 p-4 text-sm text-red-700">
           {error}
@@ -399,40 +436,60 @@ export default function CountDetailPage() {
       {loading ? (
         <LoadingSpinner />
       ) : (
-        <div className="space-y-10">
-          {Object.entries(groupedLines).map(([category, categoryLines]) => (
-            <section key={category} className="space-y-6">
-              <H2 className="text-[var(--color-primary,#004DEA)]">
-                {category}
-              </H2>
+        <div className="space-y-8">
+          {visibleLineCount.length === 0 ? (
+            <div className="rounded-[24px] bg-white/75 px-5 py-6 text-sm text-[var(--color-foreground,#3A3A3A)]">
+              No items match "{searchQuery.trim()}".
+            </div>
+          ) : (
+            Object.entries(groupedLines).map(([category, categoryLines]) => (
+              <section
+                key={category}
+                hidden={
+                  normalizedSearchQuery !== "" &&
+                  !categoryLines.some((line) => matchingLineIds.has(line.id))
+                }
+                className="space-y-4"
+              >
+                <H2 className="text-[var(--color-primary,#004DEA)]">
+                  {category}
+                </H2>
 
-              {categoryLines.map((line) => (
-                <InventoryLineCard
-                  key={line.id}
-                  line={line}
-                  onSave={updateLine}
-                  onUserQuantityChange={recordUnsavedLineQuantities}
-                  collapsed={!!collapsedLineIds[line.id]}
-                  onExpand={() => {
-                    setCollapsedLineIds((prev) => {
-                      const next = {
-                        ...prev,
-                        [line.id]: false,
-                      };
+                {categoryLines.map((line) => (
+                  <div
+                    key={line.id}
+                    hidden={
+                      normalizedSearchQuery !== "" &&
+                      !matchingLineIds.has(line.id)
+                    }
+                  >
+                    <InventoryLineCard
+                      line={line}
+                      onSave={updateLine}
+                      onUserQuantityChange={recordUnsavedLineQuantities}
+                      collapsed={!!collapsedLineIds[line.id]}
+                      onExpand={() => {
+                        setCollapsedLineIds((prev) => {
+                          const next = {
+                            ...prev,
+                            [line.id]: false,
+                          };
 
-                      if (collapsedStorageKey) {
-                        try {
-                          localStorage.setItem(collapsedStorageKey, JSON.stringify(next));
-                        } catch {}
-                      }
+                          if (collapsedStorageKey) {
+                            try {
+                              localStorage.setItem(collapsedStorageKey, JSON.stringify(next));
+                            } catch {}
+                          }
 
-                      return next;
-                    });
-                  }}
-                />
-              ))}
-            </section>
-          ))}
+                          return next;
+                        });
+                      }}
+                    />
+                  </div>
+                ))}
+              </section>
+            ))
+          )}
         </div>
       )}
       </main>
@@ -532,7 +589,7 @@ function InventoryLineCard({
       <button
         type="button"
         onClick={onExpand}
-        className="flex w-full items-center justify-between gap-6 py-2 text-left transition active:scale-[0.99]"
+        className="flex w-full items-center justify-between gap-6 py-1.25 text-left transition active:scale-[0.99]"
         aria-label={`Edit ${line.item_name}`}
       >
         <div className="min-w-0 space-y-1">
@@ -572,7 +629,7 @@ function InventoryLineCard({
         item_category: line.item_category,
         item_unit: line.item_unit,
         item_par: line.item_par,
-        item_threshold: line.item_threshold,
+        count_increment: line.count_increment,
         trailer_qty: trailer,
         storage_qty: storage,
       }}
