@@ -7,7 +7,7 @@ type InventoryItem = {
   item_category: string | null;
   item_unit: string | null;
   item_par?: number | null;
-  item_threshold?: number | null;
+  count_increment?: number | null;
   trailer_qty: number;
   storage_qty: number;
   total?: number;
@@ -33,8 +33,7 @@ function buildMetaLabel(item: InventoryItem) {
 }
 
 function getQuantityStep(item: InventoryItem) {
-  const threshold = item.item_threshold ?? 0;
-  return Number.isInteger(threshold) ? 1 : 0.25;
+  return item.count_increment === 0.25 ? 0.25 : 1;
 }
 
 export default function InventoryItemCard({
